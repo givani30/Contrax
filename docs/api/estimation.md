@@ -12,8 +12,8 @@ The namespace includes:
 - `ekf()` and `ukf()` for nonlinear filtering
 - `ekf_predict()`, `ekf_update()`, `ekf_step()` for one-step nonlinear loops
 - `rts()` and `uks()` for offline smoothing
-- `innovation_diagnostics()`, `likelihood_diagnostics()`, and
-  `ukf_diagnostics()` for routine estimator-health summaries
+- `innovation_diagnostics()`, `likelihood_diagnostics()`,
+  `ukf_diagnostics()`, and `smoother_diagnostics()` for routine estimator-health summaries
 - `mhe_objective()`, `mhe()`, `mhe_warm_start()`, and
   `soft_quadratic_penalty()` for fixed-window optimization-based estimation
 - `positive_exp()`, `positive_softplus()`, `spd_from_cholesky_raw()`, and
@@ -332,6 +332,11 @@ health checks:
 - `innovation_rms(result)` gives a quick residual-scale summary for either
   [`KalmanResult`][contrax.types.KalmanResult] or
   [`UKFResult`][contrax.types.UKFResult]
+- `smoother_diagnostics(smoothed, filtered)` checks whether the smoother
+  satisfied its covariance-reduction guarantee
+  (`P_smooth ≤ P_filtered`) and reports the worst-case violation, state
+  correction magnitudes, and PSD health of the smoothed covariances.
+  Accepts `RTSResult` paired with either `KalmanResult` or `UKFResult`.
 
 These helpers are intentionally honest and lightweight. They are good for
 filter tuning, regression checks, and notebook-free workflow validation, but
@@ -359,7 +364,8 @@ positivity and covariance-parameterization transforms.
   [`UKFResult`][contrax.types.UKFResult],
   [`KalmanGainResult`][contrax.types.KalmanGainResult],
   [`RTSResult`][contrax.types.RTSResult],
-  [`InnovationDiagnostics`][contrax.types.InnovationDiagnostics], and
+  [`InnovationDiagnostics`][contrax.types.InnovationDiagnostics],
+  [`SmootherDiagnostics`][contrax.types.SmootherDiagnostics], and
   [`MHEResult`][contrax.types.MHEResult]
 - [Kalman filtering](../tutorials/kalman-filtering.md) for an end-to-end
   workflow

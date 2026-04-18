@@ -29,6 +29,8 @@ nav = [
     {"LQR optimal execution" = "examples/lqr-optimal-execution.md"},
     {"Continuous nonlinear estimation" = "examples/continuous-nonlinear-estimation.md"},
     {"Structured nonlinear estimation" = "examples/structured-nonlinear-estimation.md"},
+    {"FOH estimation" = "examples/foh-estimation.md"},
+    {"Nonlinear MHE" = "examples/nonlinear-mhe.md"},
   ]},
   {"API reference" = [
     {"Systems" = "api/systems.md"},

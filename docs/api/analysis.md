@@ -9,6 +9,8 @@ The namespace includes:
 - `poles()` for eigenvalue inspection
 - `evalfr()`, `freqresp()`, and `dcgain()` for transfer evaluation
 - `ctrb_gramian()` and `obsv_gramian()` for finite-horizon continuous Gramians
+- `lyap()` and `dlyap()` for continuous and discrete Lyapunov equation solvers
+- `zeros()` for transmission zeros of square LTI systems
 
 ## Minimal Example
 
@@ -50,6 +52,25 @@ algebra path does.
 
 The Gramian helpers are continuous-time, matrix-exponential-based utilities
 rather than hot-path primitives.
+
+## Lyapunov Equations
+
+`lyap(A, Q)` solves the continuous Lyapunov equation $A X + X A^\top + Q = 0$.
+`dlyap(A, Q)` solves the discrete form $A X A^\top - X + Q = 0$.
+
+Both are design-time utilities implemented via the Kronecker-form linear system.
+They are not intended for use in hot paths.
+
+## Transmission Zeros
+
+`zeros(sys)` computes the transmission zeros of a square LTI system.
+
+For invertible $D$, zeros are the eigenvalues of $A - B D^{-1} C$.
+
+For $D = 0$ (the common case), zeros are computed via controlled-invariant
+subspace iteration using SVD-based null-space and range-space operations — no
+generalized Schur decomposition is required, keeping the computation JAX-native
+without a GPU-unfriendly LAPACK dispatch.
 
 ## Numerical Notes
 

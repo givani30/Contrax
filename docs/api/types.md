@@ -16,7 +16,9 @@ Use them as named return values rather than unpacking by position:
   `phs_diagnostics()`
 - [`InnovationDiagnostics`][contrax.types.InnovationDiagnostics] and
   [`LikelihoodDiagnostics`][contrax.types.LikelihoodDiagnostics] for
-  estimation-health helpers
+  filter-health helpers
+- [`SmootherDiagnostics`][contrax.types.SmootherDiagnostics] for
+  RTS/UKS covariance-reduction health checks
 
 ## Why Result Bundles Exist
 
@@ -47,6 +49,9 @@ Some fields are especially worth knowing about:
   the local port-Hamiltonian power-balance residual
 - [`InnovationDiagnostics.mean_nis`](#contrax.types.InnovationDiagnostics.mean_nis):
   the mean normalized innovation squared summary
+- [`SmootherDiagnostics.min_covariance_reduction`](#contrax.types.SmootherDiagnostics.min_covariance_reduction):
+  the worst-case smoother covariance-reduction health flag; negative means the
+  smoother increased variance in some direction
 
 ## Related Pages
 
