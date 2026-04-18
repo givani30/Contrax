@@ -1,0 +1,20 @@
+{% extends "_base/attribute.html.jinja" %}
+
+{% block heading scoped %}
+  {% if config.show_symbol_type_heading %}<code class="doc-symbol doc-symbol-heading doc-symbol-attribute"></code>{% endif %}
+  {% if config.heading and root %}
+    {{ config.heading }}
+  {% elif config.separate_signature %}
+    <span class="doc doc-object-name doc-attribute-name">{{ attribute_name }}</span>
+  {% elif config.signature_crossrefs %}
+    <code class="highlight language-python">
+      {{ attribute_name }}{% if attribute.annotation and config.show_signature_annotations %}: {% with expression = attribute.annotation, backlink_type = "used-by" %}{% include "expression.html.jinja" with context %}{% endwith %}{% endif %}
+      {% if config.show_attribute_values and attribute.value %} = {% with expression = attribute.value, backlink_type = "used-by" %}{% include "expression.html.jinja" with context %}{% endwith %}{% endif %}
+    </code>
+  {% else %}
+    {%+ filter highlight(language="python", inline=True) %}
+      {{ attribute_name }}{% if attribute.annotation and config.show_signature_annotations %}: {{ attribute.annotation }}{% endif %}
+      {% if config.show_attribute_values and attribute.value %} = {{ attribute.value }}{% endif %}
+    {% endfilter %}
+  {% endif %}
+{% endblock heading %}

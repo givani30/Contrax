@@ -1,0 +1,22 @@
+{% extends "_base/function.html.jinja" %}
+
+{% block heading scoped %}
+  {% if config.show_symbol_type_heading %}<code class="doc-symbol doc-symbol-heading doc-symbol-{{ symbol_type }}"></code>{% endif %}
+  {% if config.heading and root %}
+    {{ config.heading }}
+  {% elif config.separate_signature %}
+    <span class="doc doc-object-name doc-function-name">{{ function_name }}</span>
+  {% elif config.signature_crossrefs %}
+    <code class="highlight language-python">
+      {{ function_name -}}
+      {%- include "type_parameters.html.jinja" with context -%}
+      {%- include "signature.html.jinja" with context -%}
+    </code>
+  {% else %}
+    {%+ filter highlight(language="python", inline=True) -%}
+      {{ function_name }}
+      {%- include "type_parameters.html.jinja" with context -%}
+      {%- include "signature.html.jinja" with context -%}
+    {%- endfilter %}
+  {% endif %}
+{% endblock heading %}

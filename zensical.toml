@@ -1,0 +1,135 @@
+[project]
+site_name = "Contrax"
+description = "Differentiable control theory primitives for JAX"
+docs_dir = "docs"
+site_dir = "site"
+site_description = "MATLAB-familiar control primitives with JAX-native differentiability, batching, and compilation."
+extra = {polyfills = ["https://polyfill.io/v3/polyfill.min.js?features=es6"]}
+extra_javascript = [
+  "assets/javascripts/mathjax.js",
+  {path = "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js", defer = true},
+]
+nav = [
+  {"Home" = "index.md"},
+  {"Getting started" = "getting-started.md"},
+  {"Tutorials" = [
+    {"Differentiable LQR" = "tutorials/differentiable-lqr.md"},
+    {"Linearize, LQR, simulate" = "tutorials/linearize-lqr-simulate.md"},
+    {"Continuous LQR" = "tutorials/continuous-lqr.md"},
+    {"Kalman filtering" = "tutorials/kalman-filtering.md"},
+  ]},
+  {"How-to guides" = [
+    {"Tune LQR weights with gradients" = "how-to/tune-lqr-with-gradients.md"},
+    {"Handle missing measurements" = "how-to/handle-missing-measurements.md"},
+    {"Batch controller design" = "how-to/batch-controller-design.md"},
+    {"Build an MHE objective" = "how-to/build-mhe-objective.md"},
+  ]},
+  {"Examples" = [
+    {"JAX-native workflows" = "examples/jax-native-workflows.md"},
+    {"LQR optimal execution" = "examples/lqr-optimal-execution.md"},
+    {"Continuous nonlinear estimation" = "examples/continuous-nonlinear-estimation.md"},
+    {"Structured nonlinear estimation" = "examples/structured-nonlinear-estimation.md"},
+  ]},
+  {"API reference" = [
+    {"Systems" = "api/systems.md"},
+    {"Control" = "api/control.md"},
+    {"Simulation" = "api/simulation.md"},
+    {"Estimation" = "api/estimation.md"},
+    {"Analysis" = "api/analysis.md"},
+    {"Types" = "api/types.md"},
+  ]},
+  {"Theory" = [
+    {"Discretization and linearization" = "theory/discretization-and-linearization.md"},
+    {"Estimation pipelines" = "theory/estimation-pipelines.md"},
+    {"Riccati solvers" = "theory/riccati-solvers.md"},
+    {"JAX transform contract" = "theory/jax-transform-contract.md"},
+  ]},
+]
+
+[project.theme]
+variant = "modern"
+logo = "assets/images/contrax-mark.svg"
+font = {text = "IBM Plex Sans", code = "IBM Plex Mono"}
+palette = [
+  {scheme = "default", primary = "teal", accent = "amber"}
+]
+features = [
+  "navigation.sections",
+  "navigation.path",
+  "navigation.top",
+  "toc.follow",
+]
+
+extra_css = ["assets/stylesheets/extra.css"]
+
+[project.markdown_extensions.abbr]
+
+[project.markdown_extensions.admonition]
+
+[project.markdown_extensions.attr_list]
+
+[project.markdown_extensions.def_list]
+
+[project.markdown_extensions.footnotes]
+
+[project.markdown_extensions.md_in_html]
+
+[project.markdown_extensions.toc]
+permalink = true
+
+[project.markdown_extensions.pymdownx.arithmatex]
+generic = true
+
+[project.markdown_extensions.pymdownx.betterem]
+
+[project.markdown_extensions.pymdownx.caret]
+
+[project.markdown_extensions.pymdownx.details]
+
+[project.markdown_extensions.pymdownx.emoji]
+
+[project.markdown_extensions.pymdownx.highlight]
+anchor_linenums = true
+line_spans = "__span"
+pygments_lang_class = true
+
+[project.markdown_extensions.pymdownx.inlinehilite]
+
+[project.markdown_extensions.pymdownx.keys]
+
+[project.markdown_extensions.pymdownx.magiclink]
+
+[project.markdown_extensions.pymdownx.mark]
+
+[project.markdown_extensions.pymdownx.snippets]
+base_path = ["."]
+check_paths = true
+
+[project.markdown_extensions.pymdownx.smartsymbols]
+
+[project.markdown_extensions.pymdownx.superfences]
+custom_fences = [{name = "mermaid", class = "mermaid"}]
+
+[project.markdown_extensions.pymdownx.tabbed]
+alternate_style = true
+combine_header_slug = true
+
+[project.markdown_extensions.pymdownx.tasklist]
+custom_checkbox = true
+
+[project.markdown_extensions.pymdownx.tilde]
+
+[project.plugins.mkdocstrings]
+custom_templates = "docs/templates"
+
+[project.plugins.mkdocstrings.handlers.python]
+inventories = ["https://docs.python.org/3/objects.inv"]
+paths = ["."]
+
+[project.plugins.mkdocstrings.handlers.python.options]
+docstring_style = "google"
+inherited_members = true
+show_source = true
+show_root_heading = true
+show_signature_annotations = true
+signature_crossrefs = true

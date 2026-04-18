@@ -1,0 +1,16 @@
+{% extends "_base/type_alias.html.jinja" %}
+
+{% block heading scoped %}
+  {% if config.show_symbol_type_heading %}<code class="doc-symbol doc-symbol-heading doc-symbol-type_alias"></code>{% endif %}
+  {% if config.separate_signature %}
+    <span class="doc doc-object-name doc-type_alias-name">{{ type_alias_name }}</span>
+  {% elif config.signature_crossrefs %}
+    <code class="highlight language-python">
+      {{ type_alias_name }}{% include "type_parameters.html.jinja" with context %} = {% with expression = type_alias.value, backlink_type = "used-by" %}{% include "expression.html.jinja" with context %}{% endwith %}
+    </code>
+  {% else %}
+    {%+ filter highlight(language="python", inline=True) %}
+      {{ type_alias_name }}{% include "type_parameters.html.jinja" with context %} = {{ type_alias.value }}
+    {% endfilter %}
+  {% endif %}
+{% endblock heading %}

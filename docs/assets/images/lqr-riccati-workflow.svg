@@ -1,0 +1,80 @@
+<svg width="1400" height="380" viewBox="0 0 1400 380" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="ric-bg" x1="0" y1="0" x2="1400" y2="380" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F8FCFC"/>
+      <stop offset="1" stop-color="#EEF7F6"/>
+    </linearGradient>
+    <linearGradient id="ric-accent" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#0F766E"/>
+      <stop offset="1" stop-color="#164E63"/>
+    </linearGradient>
+    <filter id="ric-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#12313C" flood-opacity="0.10"/>
+    </filter>
+    <marker id="ric-arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0 0L12 6L0 12V0Z" fill="#0F766E"/>
+    </marker>
+  </defs>
+
+  <rect width="1400" height="380" rx="28" fill="url(#ric-bg)"/>
+  <circle cx="1190" cy="76" r="92" fill="#F59E0B" fill-opacity="0.08"/>
+  <circle cx="110" cy="324" r="80" fill="#0F766E" fill-opacity="0.06"/>
+
+  <text x="58" y="54" fill="#164E63" font-family="IBM Plex Sans, Arial, sans-serif" font-size="28" font-weight="700">
+    Riccati-backed LQR design
+  </text>
+  <text x="58" y="86" fill="#12313C" font-family="IBM Plex Sans, Arial, sans-serif" font-size="18">
+    Combine a plant model with quadratic weights, solve for S, recover K, then inspect the closed loop.
+  </text>
+
+  <g filter="url(#ric-shadow)">
+    <rect x="58" y="146" width="228" height="118" rx="20" fill="white" stroke="#0F766E" stroke-opacity="0.22" stroke-width="2"/>
+    <text x="121" y="182" fill="#164E63" font-family="IBM Plex Sans, Arial, sans-serif" font-size="23" font-weight="700">Plant model</text>
+    <text x="92" y="209" fill="#12313C" font-family="IBM Plex Sans, Arial, sans-serif" font-size="16">
+      <tspan x="92" dy="0">DiscLTI or ContLTI</tspan>
+      <tspan x="92" dy="22">system matrices A, B</tspan>
+    </text>
+
+    <rect x="330" y="146" width="220" height="118" rx="20" fill="white" stroke="#0F766E" stroke-opacity="0.22" stroke-width="2"/>
+    <text x="399" y="182" fill="#164E63" font-family="IBM Plex Sans, Arial, sans-serif" font-size="23" font-weight="700">Weights</text>
+    <text x="372" y="209" fill="#12313C" font-family="IBM Plex Sans, Arial, sans-serif" font-size="16">
+      <tspan x="372" dy="0">Q and R define the</tspan>
+      <tspan x="372" dy="22">quadratic cost</tspan>
+    </text>
+
+    <rect x="594" y="128" width="338" height="154" rx="20" fill="white" stroke="#0F766E" stroke-opacity="0.24" stroke-width="2"/>
+    <rect x="626" y="152" width="116" height="48" rx="12" fill="url(#ric-accent)" fill-opacity="0.12" stroke="#0F766E" stroke-opacity="0.18"/>
+    <rect x="784" y="152" width="116" height="48" rx="12" fill="url(#ric-accent)" fill-opacity="0.12" stroke="#0F766E" stroke-opacity="0.18"/>
+    <text x="665" y="182" fill="#164E63" font-family="IBM Plex Sans, Arial, sans-serif" font-size="20" font-weight="700">dare()</text>
+    <text x="825" y="182" fill="#164E63" font-family="IBM Plex Sans, Arial, sans-serif" font-size="20" font-weight="700">care()</text>
+    <text x="658" y="225" fill="#12313C" font-family="IBM Plex Sans, Arial, sans-serif" font-size="16">
+      <tspan x="658" dy="0">solve the Riccati equation</tspan>
+      <tspan x="658" dy="22">recover S and gain K</tspan>
+      <tspan x="658" dy="22">use a differentiable backward path</tspan>
+    </text>
+
+    <rect x="976" y="146" width="176" height="118" rx="20" fill="white" stroke="#0F766E" stroke-opacity="0.22" stroke-width="2"/>
+    <text x="1036" y="182" fill="#164E63" font-family="IBM Plex Sans, Arial, sans-serif" font-size="23" font-weight="700">Result</text>
+    <text x="1017" y="209" fill="#12313C" font-family="IBM Plex Sans, Arial, sans-serif" font-size="16">
+      <tspan x="1017" dy="0">K, S, poles</tspan>
+      <tspan x="1017" dy="22">residual norm</tspan>
+    </text>
+
+    <rect x="1196" y="146" width="146" height="118" rx="20" fill="white" stroke="#0F766E" stroke-opacity="0.22" stroke-width="2"/>
+    <text x="1234" y="182" fill="#164E63" font-family="IBM Plex Sans, Arial, sans-serif" font-size="23" font-weight="700">Check</text>
+    <text x="1221" y="209" fill="#12313C" font-family="IBM Plex Sans, Arial, sans-serif" font-size="16">
+      <tspan x="1221" dy="0">A - B K</tspan>
+      <tspan x="1221" dy="22">stability</tspan>
+    </text>
+  </g>
+
+  <path d="M286 201H330" stroke="#0F766E" stroke-width="4" stroke-linecap="round" marker-end="url(#ric-arrow)"/>
+  <path d="M550 201H594" stroke="#0F766E" stroke-width="4" stroke-linecap="round" marker-end="url(#ric-arrow)"/>
+  <path d="M932 201H976" stroke="#0F766E" stroke-width="4" stroke-linecap="round" marker-end="url(#ric-arrow)"/>
+  <path d="M1152 201H1196" stroke="#0F766E" stroke-width="4" stroke-linecap="round" marker-end="url(#ric-arrow)"/>
+
+  <rect x="450" y="306" width="500" height="46" rx="14" fill="url(#ric-accent)" fill-opacity="0.10" stroke="#0F766E" stroke-opacity="0.18"/>
+  <text x="512" y="335" fill="#164E63" font-family="IBM Plex Sans, Arial, sans-serif" font-size="19" font-weight="700">
+    lqr() packages the whole design path into one call
+  </text>
+</svg>

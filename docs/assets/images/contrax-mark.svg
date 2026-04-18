@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Contrax mark">
+  <defs>
+    <linearGradient id="contrax-gradient" x1="16" y1="20" x2="112" y2="108" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0f766e"/>
+      <stop offset="1" stop-color="#164e63"/>
+    </linearGradient>
+  </defs>
+  <rect x="10" y="10" width="108" height="108" rx="24" fill="url(#contrax-gradient)"/>
+  <path d="M36 39c-11 8-17 16-17 25s6 17 17 25" fill="none" stroke="#ecfeff" stroke-linecap="round" stroke-linejoin="round" stroke-width="9"/>
+  <path d="M92 39c11 8 17 16 17 25s-6 17-17 25" fill="none" stroke="#ecfeff" stroke-linecap="round" stroke-linejoin="round" stroke-width="9"/>
+  <path d="M47 84l33-40" fill="none" stroke="#fbbf24" stroke-linecap="round" stroke-width="10"/>
+</svg>

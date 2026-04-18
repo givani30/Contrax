@@ -1,0 +1,74 @@
+<svg width="1400" height="340" viewBox="0 0 1400 340" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="lin-bg" x1="0" y1="0" x2="1400" y2="340" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F8FCFC"/>
+      <stop offset="1" stop-color="#EEF7F6"/>
+    </linearGradient>
+    <filter id="lin-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#12313C" flood-opacity="0.10"/>
+    </filter>
+    <marker id="lin-arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0 0L12 6L0 12V0Z" fill="#0F766E"/>
+    </marker>
+  </defs>
+
+  <rect width="1400" height="340" rx="28" fill="url(#lin-bg)"/>
+  <circle cx="1178" cy="70" r="88" fill="#F59E0B" fill-opacity="0.08"/>
+
+  <text x="58" y="54" fill="#164E63" font-family="IBM Plex Sans, Arial, sans-serif" font-size="28" font-weight="700">
+    Nonlinear-to-LQR workflow
+  </text>
+  <text x="58" y="86" fill="#12313C" font-family="IBM Plex Sans, Arial, sans-serif" font-size="18">
+    Build a local linear model, discretize it, design the controller, then check the closed loop.
+  </text>
+
+  <g filter="url(#lin-shadow)">
+    <rect x="58" y="136" width="200" height="110" rx="18" fill="white" stroke="#0F766E" stroke-opacity="0.22" stroke-width="2"/>
+    <text x="100" y="172" fill="#164E63" font-family="IBM Plex Sans, Arial, sans-serif" font-size="22" font-weight="700">Nonlinear model</text>
+    <text x="96" y="199" fill="#12313C" font-family="IBM Plex Sans, Arial, sans-serif" font-size="16">
+      <tspan x="96" dy="0">dynamics f(t, x, u)</tspan>
+      <tspan x="96" dy="22">output h(t, x, u)</tspan>
+    </text>
+
+    <rect x="300" y="136" width="180" height="110" rx="18" fill="white" stroke="#0F766E" stroke-opacity="0.22" stroke-width="2"/>
+    <text x="330" y="172" fill="#164E63" font-family="IBM Plex Sans, Arial, sans-serif" font-size="22" font-weight="700">linearize_ss</text>
+    <text x="334" y="199" fill="#12313C" font-family="IBM Plex Sans, Arial, sans-serif" font-size="16">
+      <tspan x="334" dy="0">A, B, C, D</tspan>
+      <tspan x="334" dy="22">at x0, u0</tspan>
+    </text>
+
+    <rect x="522" y="136" width="152" height="110" rx="18" fill="white" stroke="#0F766E" stroke-opacity="0.22" stroke-width="2"/>
+    <text x="557" y="172" fill="#164E63" font-family="IBM Plex Sans, Arial, sans-serif" font-size="22" font-weight="700">ContLTI</text>
+    <text x="557" y="199" fill="#12313C" font-family="IBM Plex Sans, Arial, sans-serif" font-size="16">
+      <tspan x="557" dy="0">continuous</tspan>
+      <tspan x="557" dy="22">state-space model</tspan>
+    </text>
+
+    <rect x="716" y="136" width="140" height="110" rx="18" fill="white" stroke="#0F766E" stroke-opacity="0.22" stroke-width="2"/>
+    <text x="761" y="172" fill="#164E63" font-family="IBM Plex Sans, Arial, sans-serif" font-size="22" font-weight="700">c2d</text>
+    <text x="752" y="199" fill="#12313C" font-family="IBM Plex Sans, Arial, sans-serif" font-size="16">
+      <tspan x="752" dy="0">zoh</tspan>
+      <tspan x="752" dy="22">or tustin</tspan>
+    </text>
+
+    <rect x="898" y="136" width="152" height="110" rx="18" fill="white" stroke="#0F766E" stroke-opacity="0.22" stroke-width="2"/>
+    <text x="934" y="172" fill="#164E63" font-family="IBM Plex Sans, Arial, sans-serif" font-size="22" font-weight="700">DiscLTI</text>
+    <text x="939" y="199" fill="#12313C" font-family="IBM Plex Sans, Arial, sans-serif" font-size="16">
+      <tspan x="939" dy="0">discrete</tspan>
+      <tspan x="939" dy="22">state-space model</tspan>
+    </text>
+
+    <rect x="1092" y="136" width="250" height="110" rx="18" fill="white" stroke="#0F766E" stroke-opacity="0.22" stroke-width="2"/>
+    <text x="1160" y="172" fill="#164E63" font-family="IBM Plex Sans, Arial, sans-serif" font-size="22" font-weight="700">lqr + simulate</text>
+    <text x="1142" y="199" fill="#12313C" font-family="IBM Plex Sans, Arial, sans-serif" font-size="16">
+      <tspan x="1142" dy="0">gain, poles</tspan>
+      <tspan x="1142" dy="22">closed-loop rollout</tspan>
+    </text>
+  </g>
+
+  <path d="M258 191H300" stroke="#0F766E" stroke-width="4" stroke-linecap="round" marker-end="url(#lin-arrow)"/>
+  <path d="M480 191H522" stroke="#0F766E" stroke-width="4" stroke-linecap="round" marker-end="url(#lin-arrow)"/>
+  <path d="M674 191H716" stroke="#0F766E" stroke-width="4" stroke-linecap="round" marker-end="url(#lin-arrow)"/>
+  <path d="M856 191H898" stroke="#0F766E" stroke-width="4" stroke-linecap="round" marker-end="url(#lin-arrow)"/>
+  <path d="M1050 191H1092" stroke="#0F766E" stroke-width="4" stroke-linecap="round" marker-end="url(#lin-arrow)"/>
+</svg>
