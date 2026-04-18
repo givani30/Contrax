@@ -262,6 +262,28 @@ For rolling-window use:
 - `soft_quadratic_penalty(residuals, weight)` is a small helper for soft state,
   terminal, or envelope penalties inside `extra_cost`
 
+## One-Step Helper Signatures
+
+The one-step helpers follow the order: **model, state `(x, P)`, runtime data
+`(u/y)`, noise matrices `(Q/R)`**.
+
+```python
+# predict: advances state by one step
+x_pred, P_pred = cx.ekf_predict(model, x, P, u, Q_noise)
+x_pred, P_pred = cx.kalman_predict(sys, x, P, Q_noise, u=None)  # u optional
+
+# update: fuses a new measurement
+x, P, innov = cx.ekf_update(model, x_pred, P_pred, y, R_noise)
+x, P, innov = cx.kalman_update(sys, x_pred, P_pred, y, R_noise, u=None)
+
+# combined predict-update step
+x, P, innov = cx.ekf_step(model, x, P, u, y, Q_noise, R_noise, observation=h)
+x, P, innov = cx.kalman_step(sys, x, P, y, Q_noise, R_noise, u=None)
+```
+
+`has_measurement=False` can be passed to all step helpers to skip the update
+(useful for streams with missing samples inside `jax.lax.scan`).
+
 ## Model Inputs
 
 For nonlinear estimation, the main docs path is reusable system models such as

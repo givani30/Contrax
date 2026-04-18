@@ -314,7 +314,9 @@ def test_zeros_invertible_d():
 
 
 def test_phs_to_ss_returns_lti():
-    import jax; jax.config.update("jax_enable_x64", True)
+    import jax
+
+    jax.config.update("jax_enable_x64", True)
 
     def H(x):
         return 0.5 * jnp.dot(x, x)

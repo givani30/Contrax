@@ -157,6 +157,11 @@ $$
   `contrax.types` for the public result bundles such as `LQRResult` and
   `KalmanResult`.
 
+- __Interoperability__
+
+  `contrax.compat.python_control` for optional bidirectional conversion
+  between Contrax LTI models and `python-control` `StateSpace` objects.
+
 </div>
 
 ## Where To Start

@@ -13,6 +13,9 @@ The namespace includes:
   [`NonlinearSystem`][contrax.systems.NonlinearSystem],
   [`PHSSystem`][contrax.systems.PHSSystem], `nonlinear_system()`,
   `phs_system()`, `schedule_phs()`
+- PHS structure helpers: `canonical_J()` to define the symplectic structure
+  map, `phs_to_ss()` to extract the local state-space linearization around an
+  operating point
 - structured-system helpers: `partition_state()`, `block_observation()`,
   `block_matrix()`, `symmetrize_matrix()`, `project_psd()`,
   `phs_diagnostics()`
@@ -139,6 +142,28 @@ Use:
 
 These are intentionally lightweight helpers, not a large structured-model
 framework. They are there to make the public PHS layer ergonomic and reusable.
+
+## Port-Hamiltonian Structure Helpers
+
+`canonical_J(n)` returns the $n \times n$ canonical symplectic structure
+matrix for even $n$:
+
+$$
+J_c = \begin{bmatrix} 0 & I_{n/2} \\ -I_{n/2} & 0 \end{bmatrix}
+$$
+
+Use it when building a [`PHSSystem`][contrax.systems.PHSSystem] whose
+structure map is standard symplectic rather than a custom dissipative one.
+
+`phs_to_ss(sys, x_eq, u_eq)` linearizes a PHS at an operating point and
+returns a [`ContLTI`][contrax.systems.ContLTI]. This is the standard bridge
+from a structured nonlinear PHS model into the linear control design stack
+(`lqr`, `place`, `kalman_gain`, etc.):
+
+```python
+lti = cx.phs_to_ss(phs_sys, x_eq=jnp.zeros(4), u_eq=jnp.zeros(1))
+design = cx.lqr(cx.c2d(lti, dt=0.01), Q, R)
+```
 
 ## Linearization And Discretization
 

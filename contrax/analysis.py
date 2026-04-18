@@ -352,7 +352,9 @@ def _zeros_d0(A: Array, B: Array, C: Array) -> Array:
         # Intersect pre-image with ker(C): null space of C @ pre_basis
         C_pre = C @ pre_basis  # (p, pre_dim)
         _, sv_CP, Vt_CP = jnp.linalg.svd(C_pre, full_matrices=True)
-        rank_CP = int(jnp.sum(sv_CP > tol * float(sv_CP[0]))) if sv_CP.shape[0] > 0 else 0
+        rank_CP = (
+            int(jnp.sum(sv_CP > tol * float(sv_CP[0]))) if sv_CP.shape[0] > 0 else 0
+        )
         null_dim = pre_dim - rank_CP
         if null_dim == 0:
             return jnp.array([], dtype=jnp.complex128)
@@ -404,7 +406,7 @@ def zeros(sys: DiscLTI | ContLTI) -> Array:
         NotImplementedError: For non-square D or rank-deficient non-zero D.
     """
     A, B, C, D = sys.A, sys.B, sys.C, sys.D
-    n, m, p = A.shape[0], B.shape[1], C.shape[0]
+    m, p = B.shape[1], C.shape[0]
 
     if p != m:
         raise NotImplementedError(

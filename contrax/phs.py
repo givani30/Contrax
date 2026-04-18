@@ -11,6 +11,7 @@ import jax.numpy as jnp
 from jax import Array
 from jax.typing import ArrayLike
 
+from contrax.core import ContLTI
 from contrax.nonlinear import NonlinearSystem
 from contrax.types import PHSStructureDiagnostics
 
@@ -341,7 +342,7 @@ def phs_to_ss(
     sys: PHSSystem,
     x_eq: Array,
     u_eq: Array,
-) -> "ContLTI":
+) -> ContLTI:
     """Linearize a port-Hamiltonian system to a continuous-time state-space model.
 
     Computes the Jacobian linearization of the PHS dynamics and observation map

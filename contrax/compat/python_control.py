@@ -72,7 +72,8 @@ def from_python_control(
     control = _require_control()
     if not isinstance(sys, control.StateSpace):
         raise TypeError(
-            f"from_python_control() expects a control.StateSpace; got {type(sys).__name__}. "
+            f"from_python_control() expects a control.StateSpace; "
+            f"got {type(sys).__name__}. "
             "Convert transfer functions with control.ss(sys) first."
         )
 
