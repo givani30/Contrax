@@ -2,6 +2,12 @@
 
 **Differentiable control theory primitives for JAX.**
 
+[![CI](https://github.com/givani30/Contrax/actions/workflows/ci.yml/badge.svg)](https://github.com/givani30/Contrax/actions/workflows/ci.yml)
+[![Docs](https://img.shields.io/badge/docs-online-teal)](https://givani30.github.io/Contrax/)
+[![PyPI](https://img.shields.io/pypi/v/contrax)](https://pypi.org/project/contrax/)
+[![Python](https://img.shields.io/pypi/pyversions/contrax)](https://pypi.org/project/contrax/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Contrax is a JAX-native systems, estimation, and control toolbox.
 MATLAB-familiar names at the API surface — `ss`, `lqr`, `kalman`, `place` —
 with `jit`, `vmap`, and `grad` behavior underneath.
@@ -111,3 +117,17 @@ uv run pytest tests/ -q
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
+
+## Acknowledgements
+
+Contrax is built on top of several excellent JAX-ecosystem libraries:
+
+- **[JAX](https://github.com/google/jax)** — the foundation: JIT compilation, autodiff, and vectorization.
+- **[Equinox](https://github.com/patrick-kidger/equinox)** — pytree-compatible modules used for all result bundles and system types.
+- **[Diffrax](https://github.com/patrick-kidger/diffrax)** — ODE solvers powering `simulate()` on continuous-time models.
+- **[Optimistix](https://github.com/patrick-kidger/optimistix)** — LBFGS solver backing `mhe()`.
+- **[Lineax](https://github.com/patrick-kidger/lineax)** — linear solvers used in the estimation and Riccati paths.
+
+The DARE structured-doubling custom VJP is adapted from
+[trajax](https://github.com/google/trajax) (Google) and the DiLQR approach
+(ICML 2025). The UKF sigma-point rules follow Wan & van der Merwe (2000).
