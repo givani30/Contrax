@@ -28,7 +28,6 @@ import jax
 jax.config.update("jax_enable_x64", True)
 
 import jax.numpy as jnp
-import numpy as np
 
 import contrax as cx
 
@@ -164,7 +163,7 @@ def main():
     print(f"  final cost          = {result['final_cost']:.4e}")
     print(f"  damping: true={result['true_damping']:.3f}  "
           f"estimated={result['estimated_damping']:.3f}")
-    print(f"  angle at window end:")
+    print("  angle at window end:")
     print(f"    true      = {result['true_angle_end']:.4f} rad")
     print(f"    estimated = {result['estimated_angle_end']:.4f} rad")
     print("\nAll assertions passed.")
