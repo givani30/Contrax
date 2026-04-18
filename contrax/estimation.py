@@ -10,6 +10,7 @@ from contrax._estimation_diagnostics import (  # noqa: F401
     innovation_diagnostics,
     innovation_rms,
     likelihood_diagnostics,
+    smoother_diagnostics,
     ukf_diagnostics,
 )
 from contrax._kalman import (  # noqa: F401
@@ -43,6 +44,7 @@ __all__ = [
     "ekf_update",
     "ekf_step",
     "ukf",
+    "smoother_diagnostics",
     "ukf_diagnostics",
     "uks",
     "mhe_objective",

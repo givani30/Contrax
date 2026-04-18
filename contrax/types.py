@@ -139,6 +139,37 @@ class PHSStructureDiagnostics(eqx.Module):
     power_balance_residual: Array
 
 
+class SmootherDiagnostics(eqx.Module):
+    """Health diagnostics for RTS/UKS smoother output.
+
+    A well-behaved smoother strictly reduces uncertainty: ``P_smooth ≤ P_filtered``
+    in the positive-semidefinite sense. These diagnostics surface numerical
+    breakdown before it affects downstream analysis.
+
+    Attributes:
+        covariance_reduction: Per-step minimum eigenvalue of
+            ``P_filtered - P_smooth``. Negative values mean the smoother
+            increased variance in some direction at that step.
+        min_covariance_reduction: Scalar minimum over time. The primary
+            health flag: negative means the smoother violated its own
+            uncertainty-reduction guarantee.
+        state_corrections: Per-step L2 norm of ``x_smooth - x_filtered``.
+            Large corrections relative to filter uncertainty indicate a
+            significant prior mismatch or divergence.
+        max_state_correction: Scalar maximum correction over time.
+        smoothed_min_eigenvalue: Per-step minimum eigenvalue of ``P_smooth``.
+            Negative values indicate loss of positive-definiteness.
+        nonfinite: True if any smoothed mean or covariance contains NaN/Inf.
+    """
+
+    covariance_reduction: Array
+    min_covariance_reduction: Array
+    state_corrections: Array
+    max_state_correction: Array
+    smoothed_min_eigenvalue: Array
+    nonfinite: Array
+
+
 class InnovationDiagnostics(eqx.Module):
     """Diagnostics derived from an innovation sequence and covariance model."""
 
@@ -172,6 +203,7 @@ __all__ = [
     "RTSResult",
     "MHEResult",
     "PHSStructureDiagnostics",
+    "SmootherDiagnostics",
     "InnovationDiagnostics",
     "LikelihoodDiagnostics",
 ]

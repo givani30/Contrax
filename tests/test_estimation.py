@@ -886,6 +886,67 @@ def test_innovation_rms_accepts_kalman_and_ukf_results():
     assert jnp.allclose(cx.innovation_rms(ukf_result), expected)
 
 
+def test_smoother_diagnostics_healthy_rts():
+    """RTS smoother on a stable system should never increase uncertainty."""
+    sys = _scalar_sys()
+    Q = jnp.array([[1e-3]])
+    R = jnp.array([[1e-2]])
+    ys = jnp.linspace(0.0, 1.0, 20)[:, None]
+
+    filtered = cx.kalman(sys, Q, R, ys)
+    smoothed = cx.rts(sys, filtered, Q_noise=Q)
+    diag = cx.smoother_diagnostics(smoothed, filtered)
+
+    assert isinstance(diag, cx.SmootherDiagnostics)
+    assert diag.covariance_reduction.shape == (20,)
+    assert diag.state_corrections.shape == (20,)
+    assert diag.smoothed_min_eigenvalue.shape == (20,)
+    assert float(diag.min_covariance_reduction) >= -1e-10
+    assert jnp.all(diag.smoothed_min_eigenvalue > 0.0)
+    assert not bool(diag.nonfinite)
+
+
+def test_smoother_diagnostics_healthy_uks():
+    """UKS smoother should also satisfy the covariance-reduction guarantee."""
+    sys = cx.nonlinear_system(
+        lambda t, x, u: jnp.array([0.9 * x[0] + u[0]]),
+        observation=lambda t, x, u: jnp.array([x[0]]),
+        dt=1.0,
+        state_dim=1,
+        input_dim=1,
+        output_dim=1,
+    )
+    Q = jnp.array([[1e-3]])
+    R = jnp.array([[1e-2]])
+    ys = jnp.linspace(0.0, 1.0, 15)[:, None]
+    us = jnp.zeros((15, 1))
+
+    filtered = cx.ukf(sys, Q, R, ys, us, jnp.array([0.0]), jnp.array([[1.0]]))
+    smoothed = cx.uks(sys, filtered, Q_noise=Q, us=us)
+    diag = cx.smoother_diagnostics(smoothed, filtered)
+
+    assert float(diag.min_covariance_reduction) >= -1e-9
+    assert not bool(diag.nonfinite)
+
+
+def test_smoother_diagnostics_detects_inflated_covariance():
+    """Manually inflating P_smooth triggers a negative covariance_reduction."""
+    sys = _scalar_sys()
+    Q = jnp.array([[1e-3]])
+    ys = jnp.linspace(0.0, 1.0, 10)[:, None]
+    filtered = cx.kalman(sys, Q, jnp.array([[1e-2]]), ys)
+    smoothed = cx.rts(sys, filtered, Q_noise=Q)
+
+    # Inflate P_smooth to be larger than P_filtered — simulates a broken smoother
+    bad_smoothed = cx.RTSResult(
+        x_smooth=smoothed.x_smooth,
+        P_smooth=filtered.P * 2.0,
+    )
+    diag = cx.smoother_diagnostics(bad_smoothed, filtered)
+
+    assert float(diag.min_covariance_reduction) < 0.0
+
+
 def test_mhe_shapes_and_convergence():
     """mhe() returns correct shapes and converges on a simple scalar problem."""
     sys = _scalar_sys()

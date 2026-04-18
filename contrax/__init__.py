@@ -39,6 +39,7 @@ from contrax.estimation import (
     mhe_warm_start,
     rts,
     soft_quadratic_penalty,
+    smoother_diagnostics,
     ukf,
     ukf_diagnostics,
     uks,
@@ -87,6 +88,7 @@ from contrax.systems import (
 )
 from contrax.types import (
     InnovationDiagnostics,
+    SmootherDiagnostics,
     KalmanGainResult,
     KalmanResult,
     LikelihoodDiagnostics,
@@ -158,6 +160,7 @@ __all__ = [
     "mhe_warm_start",
     "mhe",
     "soft_quadratic_penalty",
+    "smoother_diagnostics",
     "ukf",
     "ukf_diagnostics",
     "uks",
@@ -183,6 +186,7 @@ __all__ = [
     # result types
     "LQRResult",
     "InnovationDiagnostics",
+    "SmootherDiagnostics",
     "KalmanGainResult",
     "KalmanResult",
     "LikelihoodDiagnostics",
