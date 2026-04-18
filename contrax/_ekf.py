@@ -19,10 +19,10 @@ from contrax.types import KalmanResult
 
 def ekf_predict(
     model_or_f: DynamicsLike,
-    Q_noise: Array,
     x: Array,
     P: Array,
     u: Array,
+    Q_noise: Array,
     *,
     t: Array | float = 0.0,
 ) -> tuple[Array, Array]:
@@ -31,10 +31,10 @@ def ekf_predict(
     Args:
         model_or_f: Nonlinear system model or dynamics function mapping
             `(x, u)` to the next state.
-        Q_noise: Process noise covariance. Shape: `(n, n)`.
         x: Filtered mean at the previous time step. Shape: `(n,)`.
         P: Filtered covariance at the previous time step. Shape: `(n, n)`.
         u: Current input. Shape: `(m,)`.
+        Q_noise: Process noise covariance. Shape: `(n, n)`.
         t: Current sample time.
 
     Returns:
@@ -49,10 +49,10 @@ def ekf_predict(
 
 def ekf_update(
     model_or_h: ObservationLike,
-    R_noise: Array,
-    y: Array,
     x_pred: Array,
     P_pred: Array,
+    y: Array,
+    R_noise: Array,
     *,
     u: Array | None = None,
     t: Array | float = 0.0,
@@ -63,10 +63,10 @@ def ekf_update(
 
     Args:
         model_or_h: Nonlinear system model or observation function.
-        R_noise: Measurement noise covariance. Shape: `(p, p)`.
-        y: Measurement vector. Shape: `(p,)`.
         x_pred: Predicted mean. Shape: `(n,)`.
         P_pred: Predicted covariance. Shape: `(n, n)`.
+        y: Measurement vector. Shape: `(p,)`.
+        R_noise: Measurement noise covariance. Shape: `(p, p)`.
         u: Current input used by the observation model. Shape: `(m,)`.
         t: Current sample time.
         has_measurement: Whether to apply the measurement update.
@@ -126,12 +126,12 @@ def ekf_update(
 
 def ekf_step(
     model_or_f: DynamicsLike,
-    Q_noise: Array,
-    R_noise: Array,
-    y: Array,
-    u: Array,
     x: Array,
     P: Array,
+    u: Array,
+    y: Array,
+    Q_noise: Array,
+    R_noise: Array,
     *,
     t: Array | float = 0.0,
     has_measurement: Array | bool = True,
@@ -142,12 +142,12 @@ def ekf_step(
 
     Args:
         model_or_f: Nonlinear system model or dynamics function.
-        Q_noise: Process noise covariance. Shape: `(n, n)`.
-        R_noise: Measurement noise covariance. Shape: `(p, p)`.
-        y: Measurement vector. Shape: `(p,)`.
-        u: Current input. Shape: `(m,)`.
         x: Filtered mean at the previous time step. Shape: `(n,)`.
         P: Filtered covariance at the previous time step. Shape: `(n, n)`.
+        u: Current input. Shape: `(m,)`.
+        y: Measurement vector. Shape: `(p,)`.
+        Q_noise: Process noise covariance. Shape: `(n, n)`.
+        R_noise: Measurement noise covariance. Shape: `(p, p)`.
         has_measurement: Whether to apply the measurement update.
         num_iter: Number of iterated-EKF measurement linearization passes.
         observation: Observation function `h(x)` for plain dynamics callables.
@@ -166,13 +166,13 @@ def ekf_step(
                 "ekf_step(f, ..., observation=...) requires an observation function."
             )
         obs = observation
-    x_pred, P_pred = ekf_predict(model_or_f, Q_noise, x, P, u, t=t)
+    x_pred, P_pred = ekf_predict(model_or_f, x, P, u, Q_noise, t=t)
     return ekf_update(
         obs,
-        R_noise,
-        y,
         x_pred,
         P_pred,
+        y,
+        R_noise,
         u=u,
         t=t,
         has_measurement=has_measurement,
@@ -255,14 +255,14 @@ def ekf(
         y, u, t = inputs
         x_post, P_post, innov = ekf_update(
             obs,
-            R_noise,
-            y,
             x_prior,
             P_prior,
+            y,
+            R_noise,
             u=u,
             t=t,
         )
-        x_next, P_next = ekf_predict(model_or_f, Q_noise, x_post, P_post, u, t=t)
+        x_next, P_next = ekf_predict(model_or_f, x_post, P_post, u, Q_noise, t=t)
         return (x_next, P_next), (x_post, P_post, innov)
 
     _, (x_hats, Ps, innovations) = jax.lax.scan(update_predict, (x0, P0), (ys, us, ts))

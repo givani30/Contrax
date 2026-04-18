@@ -87,12 +87,12 @@ def test_kalman_step_matches_batch_filter():
     batch = cx.kalman(sys, Q, R, ys, x0=x0, P0=P0)
 
     # Step 0: update x0 directly (no predict — x0 is prior on x_0)
-    x_hat_0, P_hat_0, innov_0 = cx.kalman_update(sys, R, ys[0], x0, P0)
+    x_hat_0, P_hat_0, innov_0 = cx.kalman_update(sys, x0, P0, ys[0], R)
 
     # Steps 1+: kalman_step from the previous posterior
     def one_step(carry, y):
         x, P = carry
-        x_new, P_new, innov = cx.kalman_step(sys, Q, R, y, x, P)
+        x_new, P_new, innov = cx.kalman_step(sys, x, P, y, Q, R)
         return (x_new, P_new), (x_new, P_new, innov)
 
     _, (x_hats_rest, Ps_rest, innovs_rest) = jax.lax.scan(
@@ -116,10 +116,10 @@ def test_kalman_step_can_skip_missing_measurement_under_jit():
     P = jnp.array([[0.5]])
 
     def step(has_measurement):
-        return cx.kalman_step(sys, Q, R, y, x, P, has_measurement=has_measurement)
+        return cx.kalman_step(sys, x, P, y, Q, R, has_measurement=has_measurement)
 
     x_skip, P_skip, innov_skip = jax.jit(step)(jnp.array(False))
-    x_pred, P_pred = cx.kalman_predict(sys, Q, x, P)
+    x_pred, P_pred = cx.kalman_predict(sys, x, P, Q)
 
     assert jnp.allclose(x_skip, x_pred, atol=1e-12)
     assert jnp.allclose(P_skip, P_pred, atol=1e-12)
@@ -258,7 +258,7 @@ def test_ekf_step_matches_batch_filter():
     def h(x):
         return sys.C @ x
 
-    x_hat_0, P_hat_0, innov_0 = cx.ekf_update(h, R, ys[0], x0, P0)
+    x_hat_0, P_hat_0, innov_0 = cx.ekf_update(h, x0, P0, ys[0], R)
 
     # Steps 1+: ekf_step from the previous posterior
     def one_step(carry, inputs):
@@ -266,12 +266,12 @@ def test_ekf_step_matches_batch_filter():
         y, u = inputs
         x_new, P_new, innov = cx.ekf_step(
             f,
-            Q,
-            R,
-            y,
-            u,
             x,
             P,
+            u,
+            y,
+            Q,
+            R,
             observation=h,
         )
         return (x_new, P_new), (x_new, P_new, innov)
@@ -305,18 +305,18 @@ def test_ekf_step_can_skip_missing_measurement_under_jit():
     def step(has_measurement):
         return cx.ekf_step(
             f,
-            Q,
-            R,
-            y,
-            u,
             x,
             P,
+            u,
+            y,
+            Q,
+            R,
             observation=h,
             has_measurement=has_measurement,
         )
 
     x_skip, P_skip, innov_skip = jax.jit(step)(jnp.array(False))
-    x_pred, P_pred = cx.ekf_predict(f, Q, x, P, u)
+    x_pred, P_pred = cx.ekf_predict(f, x, P, u, Q)
 
     assert jnp.allclose(x_skip, x_pred, atol=1e-12)
     assert jnp.allclose(P_skip, P_pred, atol=1e-12)
@@ -332,8 +332,8 @@ def test_ekf_update_supports_iterated_update():
     def h(x):
         return jnp.array([x[0] ** 2])
 
-    x_one, P_one, _ = cx.ekf_update(h, R, y, x_pred, P_pred, num_iter=1)
-    x_iter, P_iter, innov_iter = cx.ekf_update(h, R, y, x_pred, P_pred, num_iter=3)
+    x_one, P_one, _ = cx.ekf_update(h, x_pred, P_pred, y, R, num_iter=1)
+    x_iter, P_iter, innov_iter = cx.ekf_update(h, x_pred, P_pred, y, R, num_iter=3)
 
     assert x_one.shape == x_iter.shape == x_pred.shape
     assert P_one.shape == P_iter.shape == P_pred.shape
@@ -914,9 +914,9 @@ def test_mhe_shapes_and_convergence():
 
     assert result.xs.shape == (T, 1)
     assert result.x_hat.shape == (1,)
-    assert result.cost.shape == ()
-    assert jnp.isfinite(result.cost)
-    assert bool(result.converged)
+    assert result.final_cost.shape == ()
+    assert jnp.isfinite(result.final_cost)
+    assert bool(result.solver_converged)
 
 
 def test_mhe_matches_rts_smoother_linear_gaussian():
@@ -977,7 +977,7 @@ def test_mhe_matches_rts_smoother_linear_gaussian():
         R_noise=R,
     )
 
-    assert bool(result.converged)
+    assert bool(result.solver_converged)
     assert jnp.allclose(result.xs, smoothed.x_smooth, atol=1e-4)
 
 
@@ -1071,7 +1071,7 @@ def test_mhe_accepts_soft_penalty_helper_in_extra_cost():
         extra_cost=extra_cost,
     )
 
-    assert jnp.isfinite(result.cost)
+    assert jnp.isfinite(result.final_cost)
 
 
 def test_positive_parameterizations_are_positive_and_jittable():

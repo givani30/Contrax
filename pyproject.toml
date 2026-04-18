@@ -8,10 +8,14 @@ version = "0.1.0"
 description = "JAX-native control theory library"
 readme = "README.md"
 requires-python = ">=3.11"
+authors = [
+    {name = "Givani Boekestijn", email = "givaniboek@gmail.com"},
+]
+license = {text = "MIT"}
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
-    "License :: Other/Proprietary License",
+    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
@@ -27,6 +31,11 @@ dependencies = [
     "lineax>=0.0.8",
     "optimistix>=0.1.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/givani30/Contrax"
+Repository = "https://github.com/givani30/Contrax"
+"Bug Tracker" = "https://github.com/givani30/Contrax/issues"
 
 [project.optional-dependencies]
 dev = [

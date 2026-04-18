@@ -23,18 +23,18 @@ def _measurement_flag(has_measurement: Array | bool) -> Array:
 
 def kalman_predict(
     sys: DiscLTI,
-    Q_noise: Array,
     x: Array,
     P: Array,
+    Q_noise: Array,
     u: Array | None = None,
 ) -> tuple[Array, Array]:
     """Predict one linear Kalman filter step.
 
     Args:
         sys: Discrete-time linear system.
-        Q_noise: Process noise covariance. Shape: `(n, n)`.
         x: Filtered mean at the previous time step. Shape: `(n,)`.
         P: Filtered covariance at the previous time step. Shape: `(n, n)`.
+        Q_noise: Process noise covariance. Shape: `(n, n)`.
         u: Optional input for the transition. Shape: `(m,)`. If omitted, the
             input term is zero.
 
@@ -49,10 +49,10 @@ def kalman_predict(
 
 def kalman_update(
     sys: DiscLTI,
-    R_noise: Array,
-    y: Array,
     x_pred: Array,
     P_pred: Array,
+    y: Array,
+    R_noise: Array,
     u: Array | None = None,
     *,
     has_measurement: Array | bool = True,
@@ -65,10 +65,10 @@ def kalman_update(
 
     Args:
         sys: Discrete-time linear system.
-        R_noise: Measurement noise covariance. Shape: `(p, p)`.
-        y: Measurement vector. Shape: `(p,)`.
         x_pred: Predicted mean. Shape: `(n,)`.
         P_pred: Predicted covariance. Shape: `(n, n)`.
+        y: Measurement vector. Shape: `(p,)`.
+        R_noise: Measurement noise covariance. Shape: `(p, p)`.
         u: Optional input for direct-feedthrough measurement models. Shape:
             `(m,)`. If omitted, the feedthrough term is zero.
         has_measurement: Whether to apply the measurement update.
@@ -102,11 +102,11 @@ def kalman_update(
 
 def kalman_step(
     sys: DiscLTI,
-    Q_noise: Array,
-    R_noise: Array,
-    y: Array,
     x: Array,
     P: Array,
+    y: Array,
+    Q_noise: Array,
+    R_noise: Array,
     u: Array | None = None,
     *,
     has_measurement: Array | bool = True,
@@ -119,24 +119,24 @@ def kalman_step(
 
     Args:
         sys: Discrete-time linear system.
-        Q_noise: Process noise covariance. Shape: `(n, n)`.
-        R_noise: Measurement noise covariance. Shape: `(p, p)`.
-        y: Measurement vector. Shape: `(p,)`.
         x: Filtered mean at the previous time step. Shape: `(n,)`.
         P: Filtered covariance at the previous time step. Shape: `(n, n)`.
+        y: Measurement vector. Shape: `(p,)`.
+        Q_noise: Process noise covariance. Shape: `(n, n)`.
+        R_noise: Measurement noise covariance. Shape: `(p, p)`.
         u: Optional input. Shape: `(m,)`.
         has_measurement: Whether to apply the measurement update.
 
     Returns:
         Tuple `(x, P, innovation)` after the step.
     """
-    x_pred, P_pred = kalman_predict(sys, Q_noise, x, P, u)
+    x_pred, P_pred = kalman_predict(sys, x, P, Q_noise, u)
     return kalman_update(
         sys,
-        R_noise,
-        y,
         x_pred,
         P_pred,
+        y,
+        R_noise,
         u,
         has_measurement=has_measurement,
     )
@@ -243,8 +243,8 @@ def kalman(
     # predicts forward to give the prior on x_{k+1}.
     def update_predict(carry, y):
         x_prior, P_prior = carry
-        x_post, P_post, innov = kalman_update(sys, R_noise, y, x_prior, P_prior)
-        x_next, P_next = kalman_predict(sys, Q_noise, x_post, P_post)
+        x_post, P_post, innov = kalman_update(sys, x_prior, P_prior, y, R_noise)
+        x_next, P_next = kalman_predict(sys, x_post, P_post, Q_noise)
         return (x_next, P_next), (x_post, P_post, innov)
 
     _, (x_hats, Ps, innovations) = jax.lax.scan(update_predict, (x0, P0), ys)

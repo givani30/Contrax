@@ -9,6 +9,7 @@ from contrax.core import ContLTI, DiscLTI
 
 __all__ = [
     "poles",
+    "zeros",
     "ctrb",
     "obsv",
     "evalfr",
@@ -16,6 +17,8 @@ __all__ = [
     "dcgain",
     "ctrb_gramian",
     "obsv_gramian",
+    "lyap",
+    "dlyap",
 ]
 
 
@@ -221,3 +224,197 @@ def obsv_gramian(sys: ContLTI, t: float = 10.0) -> Array:
     """
     require_x64("obsv_gramian")
     return _finite_horizon_gramian(sys.A.T, sys.C.T @ sys.C, t)
+
+
+def _lyapunov_operator_matrix(A: Array, *, continuous: bool) -> Array:
+    """Build the Kronecker-form linear system for a Lyapunov equation.
+
+    Continuous: maps X → AX + XA^T.
+    Discrete:   maps X → X - AXA^T.
+    """
+    n = A.shape[0]
+    basis = jnp.eye(n * n, dtype=A.dtype).reshape(n * n, n, n)
+    if continuous:
+        op = lambda X: A @ X + X @ A.T  # noqa: E731
+    else:
+        op = lambda X: X - A @ X @ A.T  # noqa: E731
+    return jax.vmap(lambda X: op(X).reshape(-1))(basis).T
+
+
+def lyap(A: Array, Q: Array) -> Array:
+    """Solve the continuous Lyapunov equation AX + XA^T + Q = 0.
+
+    Returns the unique symmetric solution X when all eigenvalues of A satisfy
+    Re(λ_i + λ_j) ≠ 0 (i.e. A is stable or the sum condition holds).
+
+    Uses an explicit Kronecker-form linear solve. This is exact for small
+    systems but scales as O(n^6) in the dense case; it is intended for
+    design-time use, not inner-loop computation.
+
+    Args:
+        A: State matrix. Shape: `(n, n)`.
+        Q: Right-hand-side matrix. Shape: `(n, n)`.
+
+    Returns:
+        Array: Solution X such that AX + XA^T = -Q. Shape: `(n, n)`.
+
+    Examples:
+        >>> import jax.numpy as jnp
+        >>> import contrax as cx
+        >>> A = jnp.array([[-1.0, 0.0], [0.0, -2.0]])
+        >>> Q = jnp.eye(2)
+        >>> X = cx.lyap(A, Q)
+        >>> jnp.allclose(A @ X + X @ A.T + Q, 0.0, atol=1e-6)
+        Array(True, dtype=bool)
+    """
+    require_x64("lyap")
+    A = jnp.asarray(A)
+    Q = jnp.asarray(Q)
+    mat = _lyapunov_operator_matrix(A, continuous=True)
+    X = jnp.linalg.solve(mat, (-Q).reshape(-1)).reshape(A.shape)
+    return (X + X.T) / 2
+
+
+def dlyap(A: Array, Q: Array) -> Array:
+    """Solve the discrete Lyapunov equation AXA^T - X + Q = 0.
+
+    Returns the unique symmetric solution X when all eigenvalues of A satisfy
+    |λ_i λ_j| ≠ 1 (i.e. A is Schur-stable or the product condition holds).
+
+    Uses an explicit Kronecker-form linear solve. This is exact for small
+    systems but scales as O(n^6) in the dense case; it is intended for
+    design-time use, not inner-loop computation.
+
+    Args:
+        A: State matrix. Shape: `(n, n)`.
+        Q: Right-hand-side matrix. Shape: `(n, n)`.
+
+    Returns:
+        Array: Solution X such that AXA^T - X = -Q. Shape: `(n, n)`.
+
+    Examples:
+        >>> import jax.numpy as jnp
+        >>> import contrax as cx
+        >>> A = jnp.array([[0.5, 0.0], [0.0, 0.3]])
+        >>> Q = jnp.eye(2)
+        >>> X = cx.dlyap(A, Q)
+        >>> jnp.allclose(A @ X @ A.T - X + Q, 0.0, atol=1e-6)
+        Array(True, dtype=bool)
+    """
+    require_x64("dlyap")
+    A = jnp.asarray(A)
+    Q = jnp.asarray(Q)
+    mat = _lyapunov_operator_matrix(A, continuous=False)
+    X = jnp.linalg.solve(mat, Q.reshape(-1)).reshape(A.shape)
+    return (X + X.T) / 2
+
+
+def _zeros_d0(A: Array, B: Array, C: Array) -> Array:
+    """Transmission zeros for D=0 via controlled-invariant subspace iteration.
+
+    Computes the largest (A, B)-controlled invariant subspace V* contained in
+    ker(C), then returns the eigenvalues of A restricted to V*. Works for
+    SISO and MIMO square (p == m) systems with zero feed-through.
+
+    Uses Python-level SVD iteration; not JIT-compilable.
+
+    Reference: Basile & Marro (1992), "Controlled and Conditioned Invariants
+    in Linear System Theory", Prentice-Hall.
+    """
+    n = A.shape[0]
+    tol = float(jnp.finfo(A.dtype).eps) * 1e4
+
+    # Initial subspace: null(C)
+    _, sv_C, Vt_C = jnp.linalg.svd(C, full_matrices=True)
+    rank_C = int(jnp.sum(sv_C > tol * (float(sv_C[0]) if sv_C.shape[0] > 0 else 1.0)))
+    Z = Vt_C[rank_C:, :].T  # orthonormal basis for ker(C), shape (n, n - rank_C)
+
+    if Z.shape[1] == 0:
+        return jnp.array([], dtype=jnp.complex128)
+
+    for _ in range(n):
+        dim_old = Z.shape[1]
+
+        # Orthonormal basis W for V + im(B)
+        U_M, sv_M, _ = jnp.linalg.svd(jnp.hstack([Z, B]), full_matrices=False)
+        rank_M = int(jnp.sum(sv_M > tol * float(sv_M[0])))
+        W = U_M[:, :rank_M]  # (n, rank_M)
+
+        # Pre-image of W under A: null space of (I - W W^T) A
+        PA = A - W @ (W.T @ A)  # (n, n)
+        _, sv_PA, Vt_PA = jnp.linalg.svd(PA, full_matrices=True)
+        rank_PA = int(jnp.sum(sv_PA > tol * float(sv_PA[0])))
+        pre_dim = n - rank_PA
+        if pre_dim == 0:
+            return jnp.array([], dtype=jnp.complex128)
+        pre_basis = Vt_PA[rank_PA:, :].T  # (n, pre_dim)
+
+        # Intersect pre-image with ker(C): null space of C @ pre_basis
+        C_pre = C @ pre_basis  # (p, pre_dim)
+        _, sv_CP, Vt_CP = jnp.linalg.svd(C_pre, full_matrices=True)
+        rank_CP = int(jnp.sum(sv_CP > tol * float(sv_CP[0]))) if sv_CP.shape[0] > 0 else 0
+        null_dim = pre_dim - rank_CP
+        if null_dim == 0:
+            return jnp.array([], dtype=jnp.complex128)
+        coords = Vt_CP[rank_CP:, :].T  # (pre_dim, null_dim)
+        Z = pre_basis @ coords  # (n, null_dim) — new basis for V_{i+1}
+
+        # Re-orthonormalize
+        Z, _ = jnp.linalg.qr(Z)
+        Z = Z[:, :null_dim]
+
+        if null_dim == dim_old:
+            break
+
+    # Zeros = eigenvalues of A restricted to V*
+    Az = Z.T @ A @ Z
+    return jnp.linalg.eigvals(Az).astype(jnp.complex128)
+
+
+def zeros(sys: DiscLTI | ContLTI) -> Array:
+    """Return the transmission zeros of a state-space system.
+
+    Transmission zeros are the values s (continuous) or z (discrete) for
+    which the Rosenbrock system matrix `M(s) = [[sI - A, -B], [C, D]]` loses rank.
+
+    **D = 0** (most common case): uses a controlled-invariant subspace
+    iteration to find V*, the largest (A, B)-controlled invariant subspace
+    in ker(C). Returns the eigenvalues of A restricted to V*. Works for both
+    SISO and square MIMO (p == m) systems.
+
+    **D invertible** (square, full rank): uses the direct formula
+    `zeros = eig(A - B @ solve(D, C))`.
+
+    Non-square D and rank-deficient non-zero D are not yet supported.
+
+    This is a design-time structural analysis primitive; it is not intended
+    for use inside `jit`-compiled loops.
+
+    Reference: Basile & Marro (1992), "Controlled and Conditioned Invariants
+    in Linear System Theory", Prentice-Hall.
+
+    Args:
+        sys: Continuous or discrete LTI system.
+
+    Returns:
+        Array: Transmission zeros. Complex dtype. Number of zeros equals
+        the dimension of V* (D = 0) or `n` (invertible D).
+
+    Raises:
+        NotImplementedError: For non-square D or rank-deficient non-zero D.
+    """
+    A, B, C, D = sys.A, sys.B, sys.C, sys.D
+    n, m, p = A.shape[0], B.shape[1], C.shape[0]
+
+    if p != m:
+        raise NotImplementedError(
+            f"zeros() requires square D (p == m); got p={p}, m={m}. "
+            "Non-square systems need a generalized eigenvalue solver."
+        )
+
+    d_is_zero = bool(jnp.max(jnp.abs(D)) < 1e-14)
+
+    if d_is_zero:
+        return _zeros_d0(A, B, C)
+
+    return jnp.linalg.eigvals(A - B @ jnp.linalg.solve(D, C)).astype(jnp.complex128)

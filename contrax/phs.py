@@ -337,6 +337,50 @@ def schedule_phs(
     )
 
 
+def phs_to_ss(
+    sys: PHSSystem,
+    x_eq: Array,
+    u_eq: Array,
+) -> "ContLTI":
+    """Linearize a port-Hamiltonian system to a continuous-time state-space model.
+
+    Computes the Jacobian linearization of the PHS dynamics and observation map
+    at the operating point `(x_eq, u_eq)`. The result is the standard
+    `ẋ ≈ A δx + B δu` / `y ≈ C δx + D δu` form around that point.
+
+    For a linear PHS with quadratic Hamiltonian `H(x) = ½ x^T M x`, the
+    linearization is exact and gives `A = (J - R) M`, `B = G`.
+
+    This is a thin convenience wrapper around
+    `linearize_ss(sys.as_nonlinear_system(), x_eq, u_eq, t=0.0)`. It adds
+    an explicit PHS-to-state-space path so that the intent is documented and
+    the connection between the PHS model and its LTI state-space representation
+    is clear.
+
+    Args:
+        sys: Port-Hamiltonian system.
+        x_eq: Equilibrium state. Shape: `(n,)`.
+        u_eq: Equilibrium input. Shape: `(m,)`.
+
+    Returns:
+        [ContLTI][contrax.systems.ContLTI]: Continuous-time LTI approximation
+        at `(x_eq, u_eq)`.
+
+    Examples:
+        >>> import jax.numpy as jnp
+        >>> import contrax as cx
+        >>> def H(x): return 0.5 * jnp.dot(x, x)
+        >>> phs = cx.phs_system(H, state_dim=2, input_dim=1)
+        >>> lti = cx.phs_to_ss(phs, jnp.zeros(2), jnp.zeros(1))
+        >>> isinstance(lti, cx.ContLTI)
+        True
+    """
+    from contrax.core import linearize_ss
+
+    nl = sys.as_nonlinear_system()
+    return linearize_ss(nl, x_eq, u_eq, t=0.0)
+
+
 __all__ = [
     "PHSSystem",
     "block_matrix",
@@ -345,6 +389,7 @@ __all__ = [
     "partition_state",
     "phs_diagnostics",
     "phs_system",
+    "phs_to_ss",
     "project_psd",
     "schedule_phs",
     "symmetrize_matrix",

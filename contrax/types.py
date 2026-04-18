@@ -99,15 +99,16 @@ class MHEResult(eqx.Module):
         xs: Estimated state trajectory over the window. Shape: `(T, n)`.
         x_hat: Terminal state estimate, equal to `xs[-1]`. Shape: `(n,)`.
             This is the estimate passed to downstream controllers or observers.
-        cost: Final MHE objective value. Shape: scalar.
-        converged: Whether the underlying optimizer reported convergence.
-            Shape: scalar bool.
+        final_cost: Final MHE objective value. Shape: scalar.
+        solver_converged: Whether the underlying optimizer reported convergence.
+            Shape: scalar bool. Note: LBFGS may report ``False`` even when the
+            solution is numerically useful; check ``final_cost`` directly.
     """
 
     xs: Array
     x_hat: Array
-    cost: Array
-    converged: Array
+    final_cost: Array
+    solver_converged: Array
 
 
 class PHSStructureDiagnostics(eqx.Module):

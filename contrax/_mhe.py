@@ -237,6 +237,6 @@ def mhe(
     return MHEResult(
         xs=xs_opt,
         x_hat=xs_opt[-1],
-        cost=fn(xs_opt, args),
-        converged=sol.result == optx.RESULTS.successful,
+        final_cost=fn(xs_opt, args),
+        solver_converged=sol.result == optx.RESULTS.successful,
     )
