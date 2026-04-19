@@ -10,6 +10,7 @@ from contrax.interconnect import parallel, series
 from contrax.nonlinear import NonlinearSystem, nonlinear_system
 from contrax.phs import (
     PHSSystem,
+    SeparablePHSSystem,
     block_matrix,
     block_observation,
     canonical_J,
@@ -19,6 +20,7 @@ from contrax.phs import (
     phs_to_ss,
     project_psd,
     schedule_phs,
+    separable_phs_system,
     symmetrize_matrix,
 )
 
@@ -27,6 +29,7 @@ __all__ = [
     "DiscLTI",
     "NonlinearSystem",
     "PHSSystem",
+    "SeparablePHSSystem",
     "partition_state",
     "block_observation",
     "block_matrix",
@@ -41,6 +44,7 @@ __all__ = [
     "nonlinear_system",
     "phs_system",
     "phs_to_ss",
+    "separable_phs_system",
     "canonical_J",
     "schedule_phs",
     "series",

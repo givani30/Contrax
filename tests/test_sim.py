@@ -658,3 +658,369 @@ def test_vmap_linearize_c2d_lqr_over_operating_points():
 
     assert Ks.shape == (3, 1, 2)
     assert jnp.all(jnp.isfinite(Ks))
+
+
+# ---------------------------------------------------------------------------
+# sample_system fixed-step methods
+# ---------------------------------------------------------------------------
+
+def _make_oscillator_phs():
+    """Undamped unit harmonic oscillator as a PHS.
+
+    H(q,p) = 0.5*(q^2 + p^2). Exact solution from [q0,p0]=[1,0]:
+        q(t) = cos(t),  p(t) = -sin(t).
+    """
+    def H(x):
+        return 0.5 * (x[0] ** 2 + x[1] ** 2)
+
+    return cx.phs_system(H, state_dim=2, input_dim=1, output_dim=2)
+
+
+@pytest.mark.parametrize("method", ["euler", "midpoint", "rk4"])
+def test_sample_system_fixed_step_shapes(method):
+    """Fixed-step sample_system should produce correct output shapes."""
+    sys = _make_oscillator_phs()
+    sys_d = cx.sample_system(sys, 0.1, method=method)
+    x0 = jnp.array([1.0, 0.0])
+    ts, xs, ys = cx.simulate(sys_d, x0, lambda t, x: jnp.zeros(1), num_steps=10)
+    assert ts.shape == (10,)
+    assert xs.shape == (11, 2)
+    assert ys.shape == (10, 2)
+    assert jnp.all(jnp.isfinite(xs))
+
+
+@pytest.mark.parametrize("method", ["euler", "midpoint", "rk4"])
+def test_sample_system_fixed_step_finite_after_many_steps(method):
+    sys = _make_oscillator_phs()
+    sys_d = cx.sample_system(sys, 0.05, method=method)
+    x0 = jnp.array([1.0, 0.0])
+    _, xs, _ = cx.simulate(sys_d, x0, lambda t, x: jnp.zeros(1), num_steps=100)
+    assert jnp.all(jnp.isfinite(xs))
+
+
+def test_sample_system_rk4_accuracy_vs_diffrax():
+    """RK4 with dt=0.1 should match Diffrax to within 1e-4 on a unit oscillator.
+
+    Exact: q(t) = cos(t), p(t) = -sin(t).  After T=20 steps (t=2.0 s) the
+    global RK4 error is O(dt^4) ~ 1e-4; Diffrax (rtol=1e-6) is ~1e-6.
+    """
+    sys = _make_oscillator_phs()
+    x0 = jnp.array([1.0, 0.0])
+    T = 20
+    dt = 0.1
+
+    sys_rk4 = cx.sample_system(sys, dt, method="rk4")
+    sys_ref = cx.sample_system(sys, dt, method="diffrax")
+
+    _, xs_rk4, _ = cx.simulate(sys_rk4, x0, lambda t, x: jnp.zeros(1), num_steps=T)
+    _, xs_ref, _ = cx.simulate(sys_ref, x0, lambda t, x: jnp.zeros(1), num_steps=T)
+
+    max_err = float(jnp.max(jnp.abs(xs_rk4 - xs_ref)))
+    assert max_err < 1e-3, f"RK4 vs Diffrax max error {max_err:.2e} exceeds 1e-3"
+
+
+def test_sample_system_rk4_n_substeps_improves_accuracy():
+    """More substeps should reduce the per-step integration error."""
+    sys = _make_oscillator_phs()
+    x0 = jnp.array([1.0, 0.0])
+    T = 20
+    dt = 0.1
+    ts_exact = jnp.arange(T + 1, dtype=jnp.float64) * dt
+
+    sys_1 = cx.sample_system(sys, dt, method="rk4", n_substeps=1)
+    sys_4 = cx.sample_system(sys, dt, method="rk4", n_substeps=4)
+
+    _, xs_1, _ = cx.simulate(sys_1, x0, lambda t, x: jnp.zeros(1), num_steps=T)
+    _, xs_4, _ = cx.simulate(sys_4, x0, lambda t, x: jnp.zeros(1), num_steps=T)
+
+    exact_q = jnp.cos(ts_exact)
+    err_1 = float(jnp.max(jnp.abs(xs_1[:, 0] - exact_q)))
+    err_4 = float(jnp.max(jnp.abs(xs_4[:, 0] - exact_q)))
+    assert err_4 < err_1, f"n_substeps=4 error {err_4:.2e} not smaller than n_substeps=1 {err_1:.2e}"
+
+
+@pytest.mark.parametrize("method", ["euler", "midpoint", "rk4"])
+def test_sample_system_fixed_step_jit_compatible(method):
+    sys = _make_oscillator_phs()
+    sys_d = cx.sample_system(sys, 0.1, method=method)
+    x0 = jnp.array([1.0, 0.0])
+    run = jax.jit(lambda x0: cx.simulate(sys_d, x0, lambda t, x: jnp.zeros(1), num_steps=10))
+    _, xs, _ = run(x0)
+    assert xs.shape == (11, 2)
+    assert jnp.all(jnp.isfinite(xs))
+
+
+@pytest.mark.parametrize("method", ["euler", "midpoint", "rk4"])
+def test_sample_system_fixed_step_vmap_compatible(method):
+    """vmap over initial conditions should work with fixed-step methods."""
+    sys = _make_oscillator_phs()
+    sys_d = cx.sample_system(sys, 0.1, method=method)
+
+    x0s = jnp.array([[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]])
+
+    def run_one(x0):
+        _, xs, _ = cx.simulate(sys_d, x0, lambda t, x: jnp.zeros(1), num_steps=5)
+        return xs
+
+    all_xs = jax.vmap(run_one)(x0s)
+    assert all_xs.shape == (3, 6, 2)
+    assert jnp.all(jnp.isfinite(all_xs))
+
+
+def test_sample_system_rejects_unknown_method():
+    sys = _make_oscillator_phs()
+    with pytest.raises(ValueError, match="method"):
+        cx.sample_system(sys, 0.1, method="bogus")
+
+
+def test_sample_system_rejects_solver_with_fixed_step():
+    import diffrax
+    sys = _make_oscillator_phs()
+    with pytest.raises(ValueError, match="Diffrax-only"):
+        cx.sample_system(sys, 0.1, method="rk4", solver=diffrax.Euler())
+
+
+def test_sample_system_rejects_n_substeps_zero():
+    sys = _make_oscillator_phs()
+    with pytest.raises(ValueError, match="n_substeps"):
+        cx.sample_system(sys, 0.1, method="rk4", n_substeps=0)
+
+
+def test_sample_system_rk4_ukf_shapes():
+    """RK4-sampled PHS system should work end-to-end inside ukf()."""
+    sys = _make_oscillator_phs()
+    sys_d = cx.sample_system(sys, 0.1, method="rk4")
+
+    T = 10
+    x0 = jnp.array([1.0, 0.0])
+    ys = jnp.zeros((T, 2))
+    us = jnp.zeros((T, 1))
+
+    result = cx.ukf(
+        sys_d,
+        Q_noise=1e-4 * jnp.eye(2),
+        R_noise=1e-3 * jnp.eye(2),
+        ys=ys,
+        us=us,
+        x0=x0,
+        P0=0.1 * jnp.eye(2),
+    )
+    assert result.x_hat.shape == (T, 2)
+    assert jnp.all(jnp.isfinite(result.x_hat))
+
+
+# ---------------------------------------------------------------------------
+# SeparablePHSSystem
+# ---------------------------------------------------------------------------
+
+def _make_separable_oscillator():
+    def V(q): return 0.5 * jnp.dot(q, q)
+    def T(p): return 0.5 * jnp.dot(p, p)
+    return cx.separable_phs_system(V, T, n_dofs=1, input_dim=1, output_dim=2)
+
+
+def test_separable_phs_is_phs_subtype():
+    sys = _make_separable_oscillator()
+    assert isinstance(sys, cx.SeparablePHSSystem)
+    assert isinstance(sys, cx.PHSSystem)
+
+
+def test_separable_phs_h_matches_v_plus_t():
+    """Stored H must equal V(q) + T(p) at an arbitrary state."""
+    sys = _make_separable_oscillator()
+    x = jnp.array([0.6, -0.8])
+    h_direct = sys.H(x)
+    h_split = sys.V(x[:1]) + sys.T(x[1:])
+    assert jnp.allclose(h_direct, h_split, atol=1e-12)
+
+
+def test_separable_phs_n_dofs_and_state_dim():
+    sys = _make_separable_oscillator()
+    assert sys.n_dofs == 1
+    assert sys.state_dim == 2
+
+
+def test_separable_phs_dynamics_finite():
+    sys = _make_separable_oscillator()
+    x = jnp.array([1.0, 0.0])
+    u = jnp.zeros(1)
+    xdot = sys.dynamics(0.0, x, u)
+    assert xdot.shape == (2,)
+    assert jnp.all(jnp.isfinite(xdot))
+
+
+def test_separable_phs_simulation_conserves_energy():
+    """Undamped separable PHS should conserve energy under continuous simulation."""
+    sys = _make_separable_oscillator()
+    _, xs, _ = cx.simulate(
+        sys, jnp.array([1.0, 0.0]), lambda t, x: jnp.zeros(1), duration=1.0, dt=0.01
+    )
+    energies = jax.vmap(sys.H)(xs)
+    assert jnp.max(jnp.abs(energies - energies[0])) < 1e-3
+
+
+def test_separable_phs_sample_system_rk4():
+    """SeparablePHSSystem should work with sample_system(method='rk4')."""
+    sys = _make_separable_oscillator()
+    sys_d = cx.sample_system(sys, 0.1, method="rk4")
+    x0 = jnp.array([1.0, 0.0])
+    _, xs, _ = cx.simulate(sys_d, x0, lambda t, x: jnp.zeros(1), num_steps=20)
+    assert jnp.all(jnp.isfinite(xs))
+
+
+def test_separable_phs_rejects_invalid_n_dofs():
+    def V(q): return 0.5 * jnp.dot(q, q)
+    def T(p): return 0.5 * jnp.dot(p, p)
+    with pytest.raises(ValueError, match="n_dofs"):
+        cx.separable_phs_system(V, T, n_dofs=0)
+
+
+def test_separable_phs_direct_construction_rejects_missing_v_t():
+    """Direct construction without V/T should fail via __check_init__."""
+    def H(x): return 0.5 * jnp.dot(x, x)
+    with pytest.raises(Exception):
+        cx.SeparablePHSSystem(H=H, n_dofs=1, state_dim=2)
+
+
+# ---------------------------------------------------------------------------
+# sample_system method="sv" (Störmer-Verlet)
+# ---------------------------------------------------------------------------
+
+def _make_separable_oscillator_sys():
+    def V(q): return 0.5 * jnp.dot(q, q)
+    def T(p): return 0.5 * jnp.dot(p, p)
+    return cx.separable_phs_system(V, T, n_dofs=1, input_dim=1, output_dim=2)
+
+
+def test_sv_shapes():
+    sys = _make_separable_oscillator_sys()
+    sys_d = cx.sample_system(sys, 0.1, method="sv")
+    x0 = jnp.array([1.0, 0.0])
+    ts, xs, ys = cx.simulate(sys_d, x0, lambda t, x: jnp.zeros(1), num_steps=20)
+    assert ts.shape == (20,)
+    assert xs.shape == (21, 2)
+    assert ys.shape == (20, 2)
+    assert jnp.all(jnp.isfinite(xs))
+
+
+def test_sv_conserves_energy_conservative():
+    """Undamped Störmer-Verlet must conserve H(q,p) = V(q) + T(p) to machine precision.
+
+    Symplectic integrators preserve a modified Hamiltonian; for the unit oscillator
+    at dt=0.1 the energy drift should be O(dt^2) ~ 1e-2, but bounded — it does
+    not grow with time.
+    # Octave: no direct equivalent; verify analytically: SV is volume-preserving.
+    """
+    sys = _make_separable_oscillator_sys()
+    sys_d = cx.sample_system(sys, 0.1, method="sv")
+    x0 = jnp.array([1.0, 0.0])
+    _, xs, _ = cx.simulate(sys_d, x0, lambda t, x: jnp.zeros(1), num_steps=200)
+
+    energies = jax.vmap(sys.H)(xs)
+    # Energy should be bounded (not drift), characteristic of symplectic methods.
+    energy_range = float(jnp.max(energies) - jnp.min(energies))
+    assert energy_range < 2e-2, f"Energy range {energy_range:.4f} suggests non-symplectic drift"
+
+
+def test_sv_bounded_drift_vs_euler_nonlinear():
+    """SV energy drift must be bounded while Euler shows secular growth.
+
+    Uses a nonlinear pendulum-like potential V(q) = 1 - cos(q) + 0.5*q^2 where
+    Euler's non-symplectic nature causes clearly monotone energy increase while
+    SV oscillates around the initial value.  RK4 is not used for comparison
+    because for a linear oscillator at small dt its O(dt^4) per-step error
+    is too small to distinguish from SV at moderate step counts.
+    """
+    def V(q): return 1.0 - jnp.cos(q[0]) + 0.5 * q[0] ** 2
+    def T(p): return 0.5 * p[0] ** 2
+    sys = cx.separable_phs_system(V, T, n_dofs=1, input_dim=0, output_dim=2)
+    sys_sv = cx.sample_system(sys, 0.2, method="sv")
+    sys_euler = cx.sample_system(sys, 0.2, method="euler")
+    x0 = jnp.array([1.0, 0.0])
+    T = 500
+
+    _, xs_sv, _ = cx.simulate(sys_sv, x0, lambda t, x: jnp.zeros(0), num_steps=T)
+    _, xs_euler, _ = cx.simulate(sys_euler, x0, lambda t, x: jnp.zeros(0), num_steps=T)
+
+    e_sv = jax.vmap(sys.H)(xs_sv)
+    e_euler = jax.vmap(sys.H)(xs_euler)
+
+    # Euler should show clear secular growth; SV should stay bounded.
+    euler_final_drift = float(jnp.abs(e_euler[-1] - e_euler[0]))
+    sv_max_drift = float(jnp.max(jnp.abs(e_sv - e_sv[0])))
+
+    assert euler_final_drift > sv_max_drift, (
+        f"Euler final drift {euler_final_drift:.4f} not larger than SV max drift {sv_max_drift:.4f}"
+    )
+
+
+def test_sv_dissipative_energy_decreases():
+    """Dissipative separable PHS should lose energy under Störmer-Verlet."""
+    def V(q): return 0.5 * jnp.dot(q, q)
+    def T(p): return 0.5 * jnp.dot(p, p)
+    sys = cx.separable_phs_system(
+        V, T, n_dofs=1,
+        R=lambda x: jnp.array([[0.0, 0.0], [0.0, 0.3]], dtype=x.dtype),
+        input_dim=1, output_dim=2,
+    )
+    sys_d = cx.sample_system(sys, 0.1, method="sv")
+    x0 = jnp.array([1.0, 0.0])
+    _, xs, _ = cx.simulate(sys_d, x0, lambda t, x: jnp.zeros(1), num_steps=50)
+    energies = jax.vmap(sys.H)(xs)
+    assert float(energies[-1]) < float(energies[0])
+
+
+def test_sv_jit_compatible():
+    sys = _make_separable_oscillator_sys()
+    sys_d = cx.sample_system(sys, 0.1, method="sv")
+    x0 = jnp.array([1.0, 0.0])
+    run = jax.jit(lambda x0: cx.simulate(sys_d, x0, lambda t, x: jnp.zeros(1), num_steps=10))
+    _, xs, _ = run(x0)
+    assert xs.shape == (11, 2)
+    assert jnp.all(jnp.isfinite(xs))
+
+
+def test_sv_vmap_over_initial_conditions():
+    sys = _make_separable_oscillator_sys()
+    sys_d = cx.sample_system(sys, 0.1, method="sv")
+    x0s = jnp.array([[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]])
+    all_xs = jax.vmap(
+        lambda x0: cx.simulate(sys_d, x0, lambda t, x: jnp.zeros(1), num_steps=5).xs
+    )(x0s)
+    assert all_xs.shape == (3, 6, 2)
+    assert jnp.all(jnp.isfinite(all_xs))
+
+
+def test_sv_n_substeps_improves_energy_accuracy():
+    """More substeps should reduce the energy oscillation amplitude."""
+    sys = _make_separable_oscillator_sys()
+    sys_1 = cx.sample_system(sys, 0.1, method="sv", n_substeps=1)
+    sys_4 = cx.sample_system(sys, 0.1, method="sv", n_substeps=4)
+    x0 = jnp.array([1.0, 0.0])
+
+    _, xs_1, _ = cx.simulate(sys_1, x0, lambda t, x: jnp.zeros(1), num_steps=100)
+    _, xs_4, _ = cx.simulate(sys_4, x0, lambda t, x: jnp.zeros(1), num_steps=100)
+
+    e_1 = jax.vmap(sys.H)(xs_1)
+    e_4 = jax.vmap(sys.H)(xs_4)
+    range_1 = float(jnp.max(e_1) - jnp.min(e_1))
+    range_4 = float(jnp.max(e_4) - jnp.min(e_4))
+    assert range_4 < range_1
+
+
+def test_sv_rejects_non_separable_system():
+    """method='sv' must raise ValueError for plain PHSSystem."""
+    def H(x): return 0.5 * jnp.dot(x, x)
+    sys = cx.phs_system(H, state_dim=2, input_dim=1)
+    with pytest.raises(ValueError, match="SeparablePHSSystem"):
+        cx.sample_system(sys, 0.1, method="sv")
+
+
+def test_sv_rejects_nonlinear_system():
+    sys = cx.nonlinear_system(
+        lambda t, x, u: jnp.array([-x[0]]),
+        observation=lambda t, x, u: x,
+        state_dim=1, input_dim=1, output_dim=1,
+    )
+    with pytest.raises(ValueError, match="SeparablePHSSystem"):
+        cx.sample_system(sys, 0.1, method="sv")

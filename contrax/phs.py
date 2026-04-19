@@ -75,6 +75,108 @@ class PHSSystem(eqx.Module):
         )
 
 
+class SeparablePHSSystem(PHSSystem):
+    """PHSSystem subtype for separable Hamiltonians H(q,p) = V(q) + T(p).
+
+    Carries `V` and `T` as separate callables so structure-preserving
+    integrators (e.g. Störmer-Verlet) can access the gradient split directly
+    without inferring separability from a black-box `H(z)`.
+
+    The stored `H` is always the derived `V(q) + T(p)`.  All PHS behaviour
+    (dynamics, diagnostics, simulation) falls through to `PHSSystem` unchanged.
+
+    Construct via `separable_phs_system()`, not directly.  The `None`/`0`
+    sentinels on `V`, `T`, and `n_dofs` exist only to satisfy Python dataclass
+    inheritance ordering (parent fields with defaults must precede child fields).
+    `__check_init__` enforces that the object is always valid after construction.
+    """
+
+    V: Callable[[Array], Array] | None = None
+    T: Callable[[Array], Array] | None = None
+    n_dofs: int = eqx.field(static=True, default=0)
+
+    def __check_init__(self) -> None:
+        if self.V is None or self.T is None:
+            raise ValueError(
+                "SeparablePHSSystem requires V and T. "
+                "Use separable_phs_system() to construct."
+            )
+        if self.n_dofs < 1:
+            raise ValueError(
+                f"n_dofs must be >= 1, got {self.n_dofs}. "
+                "Use separable_phs_system() to construct."
+            )
+
+
+def separable_phs_system(
+    V: Callable[[Array], Array],
+    T: Callable[[Array], Array],
+    *,
+    n_dofs: int,
+    R: Callable[[Array], Array] | None = None,
+    G: Callable[[Array], Array] | None = None,
+    J: Callable[[Array], Array] | None = None,
+    output: Callable | None = None,
+    input_dim: int | None = None,
+    output_dim: int | None = None,
+) -> SeparablePHSSystem:
+    """Construct a separable port-Hamiltonian system.
+
+    Builds a [SeparablePHSSystem][contrax.systems.SeparablePHSSystem] whose
+    Hamiltonian is `H(q, p) = V(q) + T(p)`.  This separability is structural —
+    the split is stored explicitly rather than inferred from a black-box
+    `H(z)` callable.  Symplectic integrators (when added to `sample_system`)
+    will require this type; non-symplectic integrators and all other Contrax
+    operations treat it identically to a `PHSSystem`.
+
+    Args:
+        V: Potential energy `V(q)`. Maps `(n_dofs,) -> scalar`.
+        T: Kinetic energy `T(p)`. Maps `(n_dofs,) -> scalar`.
+        n_dofs: Number of generalized coordinates. `state_dim = 2 * n_dofs`.
+        R: Optional dissipation map `R(x)` returning a `(2*n_dofs, 2*n_dofs)`
+            positive-semidefinite matrix.
+        G: Optional input map `G(x)` returning a `(2*n_dofs, input_dim)` matrix.
+        J: Optional structure map. Defaults to `canonical_J(n_dofs)`.
+        output: Optional measurement map with signature `(t, x, u) -> y`.
+        input_dim: Optional static input dimension metadata.
+        output_dim: Optional static output dimension metadata.
+
+    Returns:
+        [SeparablePHSSystem][contrax.systems.SeparablePHSSystem] with `H`
+        derived from `V` and `T`.
+
+    Examples:
+        >>> import jax.numpy as jnp
+        >>> import contrax as cx
+        >>> def V(q): return 0.5 * jnp.dot(q, q)
+        >>> def T(p): return 0.5 * jnp.dot(p, p)
+        >>> sys = cx.separable_phs_system(V, T, n_dofs=1, input_dim=1)
+        >>> isinstance(sys, cx.PHSSystem)
+        True
+    """
+    if n_dofs < 1:
+        raise ValueError(f"n_dofs must be >= 1, got {n_dofs}.")
+
+    def H(x: Array) -> Array:
+        q, p = x[:n_dofs], x[n_dofs:]
+        return V(q) + T(p)
+
+    return SeparablePHSSystem(
+        H=H,
+        V=V,
+        T=T,
+        n_dofs=n_dofs,
+        R=R,
+        G=G,
+        J=J,
+        observation=output,
+        dt=None,
+        state_dim=2 * n_dofs,
+        input_dim=input_dim,
+        output_dim=output_dim,
+    )
+
+
 def phs_system(
     H: Callable[[Array], Array],
     *,
@@ -384,6 +486,7 @@ def phs_to_ss(
 
 __all__ = [
     "PHSSystem",
+    "SeparablePHSSystem",
     "block_matrix",
     "block_observation",
     "canonical_J",
@@ -393,5 +496,6 @@ __all__ = [
     "phs_to_ss",
     "project_psd",
     "schedule_phs",
+    "separable_phs_system",
     "symmetrize_matrix",
 ]
