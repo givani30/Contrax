@@ -31,12 +31,12 @@ import jax.numpy as jnp
 
 import contrax as cx
 
-DT = 0.05          # sample period (s)
-WINDOW = 12        # MHE window length
-G_ACCEL = 9.81     # gravitational acceleration (m/s²)
-L = 1.0            # pendulum length (m), assumed known
-DAMPING_TRUE = 0.3 # true damping coefficient (kg·m²/s)
-N_AUG = 3          # augmented state dimension: [theta, omega, b_raw]
+DT = 0.05  # sample period (s)
+WINDOW = 12  # MHE window length
+G_ACCEL = 9.81  # gravitational acceleration (m/s²)
+L = 1.0  # pendulum length (m), assumed known
+DAMPING_TRUE = 0.3  # true damping coefficient (kg·m²/s)
+N_AUG = 3  # augmented state dimension: [theta, omega, b_raw]
 # --8<-- [end:setup]
 
 
@@ -84,7 +84,7 @@ def generate_data(seed: int = 42):
     key2 = jax.random.fold_in(key, 99)
     R_val = 0.04
     noise = jax.random.normal(key2, (n_steps + 1, 1)) * jnp.sqrt(R_val)
-    ys = xs_phys[:, :1] + noise    # noisy angle measurements
+    ys = xs_phys[:, :1] + noise  # noisy angle measurements
 
     return xs_phys, ys, us
 
@@ -103,8 +103,8 @@ def run_mhe(xs_phys, ys, us):
     x_prior = jnp.array([float(ys[0, 0]), 0.0, 0.0])
     P_prior = jnp.diag(jnp.array([0.1, 0.5, 2.0]))
 
-    ys_win = ys[: WINDOW + 1]       # (WINDOW+1, 1)
-    us_win = us[:WINDOW]             # (WINDOW, 1)
+    ys_win = ys[: WINDOW + 1]  # (WINDOW+1, 1)
+    us_win = us[:WINDOW]  # (WINDOW, 1)
 
     # Warm-start: replicate prior across window
     xs_init = jnp.tile(x_prior, (WINDOW + 1, 1))
@@ -158,11 +158,15 @@ def run_example():
 def main():
     result = run_example()
     print("Nonlinear MHE — damped pendulum with parameter estimation")
-    print(f"  converged           = {result['converged']} "
-          f"(LBFGS may report False before tolerance; check cost)")
+    print(
+        f"  converged           = {result['converged']} "
+        f"(LBFGS may report False before tolerance; check cost)"
+    )
     print(f"  final cost          = {result['final_cost']:.4e}")
-    print(f"  damping: true={result['true_damping']:.3f}  "
-          f"estimated={result['estimated_damping']:.3f}")
+    print(
+        f"  damping: true={result['true_damping']:.3f}  "
+        f"estimated={result['estimated_damping']:.3f}"
+    )
     print("  angle at window end:")
     print(f"    true      = {result['true_angle_end']:.4f} rad")
     print(f"    estimated = {result['estimated_angle_end']:.4f} rad")

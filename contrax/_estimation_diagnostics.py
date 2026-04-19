@@ -110,10 +110,10 @@ def smoother_diagnostics(
         >>> smoothed = cx.rts(sys, filtered, Q_noise=1e-3 * jnp.eye(1))
         >>> diag = cx.smoother_diagnostics(smoothed, filtered)
     """
-    x_smooth = smoothed.x_smooth   # (T, n)
-    P_smooth = smoothed.P_smooth   # (T, n, n)
-    x_filt = filtered.x_hat        # (T, n)
-    P_filt = filtered.P            # (T, n, n)
+    x_smooth = smoothed.x_smooth  # (T, n)
+    P_smooth = smoothed.P_smooth  # (T, n, n)
+    x_filt = filtered.x_hat  # (T, n)
+    P_filt = filtered.P  # (T, n, n)
 
     def _sym(M: Array) -> Array:
         return (M + M.T) / 2
@@ -125,9 +125,9 @@ def smoother_diagnostics(
 
     state_corrections = jnp.linalg.norm(x_smooth - x_filt, axis=-1)
 
-    smoothed_min_eig = jax.vmap(
-        lambda Ps: jnp.min(jnp.linalg.eigvalsh(_sym(Ps)))
-    )(P_smooth)
+    smoothed_min_eig = jax.vmap(lambda Ps: jnp.min(jnp.linalg.eigvalsh(_sym(Ps))))(
+        P_smooth
+    )
 
     nonfinite = jnp.logical_not(
         jnp.all(jnp.isfinite(x_smooth)) & jnp.all(jnp.isfinite(P_smooth))

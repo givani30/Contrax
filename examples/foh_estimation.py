@@ -26,8 +26,8 @@ import contrax as cx
 
 # Van der Pol oscillator: ẋ = [x2, μ(1-x1²)x2 - x1 + u]
 MU = 1.0
-DT = 0.1          # sample period
-T_STEPS = 50      # number of steps
+DT = 0.1  # sample period
+T_STEPS = 50  # number of steps
 # --8<-- [end:setup]
 
 
@@ -62,7 +62,7 @@ def generate_trajectory(seed: int = 0):
     # Piecewise-linear input: slowly varying
     t_axis = jnp.linspace(0.0, T_STEPS * DT, T_STEPS)
     us_raw = 0.3 * jnp.sin(2 * jnp.pi * 0.5 * t_axis)[:, None]  # (T, 1)
-    us_foh = cx.foh_inputs(us_raw)                                 # (T, 2, 1)
+    us_foh = cx.foh_inputs(us_raw)  # (T, 2, 1)
 
     # Simulate true trajectory using FOH discrete model
     x0_true = jnp.array([0.5, 0.0])
@@ -74,7 +74,7 @@ def generate_trajectory(seed: int = 0):
     R_noise = jnp.array([[0.05]])
     key, subkey = jax.random.split(key)
     noise = jax.random.normal(subkey, (T_STEPS + 1, 1)) * jnp.sqrt(R_noise[0, 0])
-    ys = xs_true[:, :1] + noise                                    # (T+1, 1)
+    ys = xs_true[:, :1] + noise  # (T+1, 1)
 
     return xs_true, ys, us_raw, us_foh
 
@@ -94,7 +94,7 @@ def run_ekf(xs_true, ys, us_foh):
     def f_foh(x, u_pair):
         return discrete_foh.dynamics(0.0, x, u_pair)
 
-    x = ys[0, :1]                      # initialise from first measurement
+    x = ys[0, :1]  # initialise from first measurement
     x = jnp.concatenate([x, jnp.zeros(1)])
     P = jnp.eye(2) * 0.5
 
@@ -104,7 +104,7 @@ def run_ekf(xs_true, ys, us_foh):
         x, P, _ = cx.ekf_update(h, x, P, ys[k + 1], R_noise)
         xs_est.append(x)
 
-    return jnp.stack(xs_est)           # (T+1, 2)
+    return jnp.stack(xs_est)  # (T+1, 2)
 
 
 # --8<-- [end:filter]
