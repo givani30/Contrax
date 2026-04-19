@@ -33,14 +33,14 @@ def run_example():
 
     phi00 = float(sys_d.A[0, 0])
     gamma00 = float(sys_d.B[0, 0])
-    place_gain = cx.place(sys_d, desired_poles())
+    place_result = cx.place(sys_d, desired_poles())
     lqr_result = cx.lqr(sys_d, jnp.eye(3), jnp.array([[1.0]]))
 
     # Octave reference values from tests/test_core.py and tests/test_control.py.
     assert abs(phi00 - 0.6375) < 1e-4
     assert abs(gamma00 - 0.04041) < 1e-4
     assert jnp.allclose(
-        place_gain,
+        place_result.K,
         jnp.array([[15.0789, 27.1937, 17.7725]]),
         atol=0.1,
     )
@@ -53,7 +53,7 @@ def run_example():
     return {
         "phi00": phi00,
         "gamma00": gamma00,
-        "place_gain": np.asarray(place_gain),
+        "place_gain": np.asarray(place_result.K),
         "lqr_gain": np.asarray(lqr_result.K),
     }
 

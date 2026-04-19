@@ -10,6 +10,7 @@ from jax import Array
 from contrax.core import ContLTI, DiscLTI
 from contrax.nonlinear import NonlinearSystem
 from contrax.phs import PHSSystem
+from contrax.types import SimResult
 
 
 def rollout(
@@ -69,7 +70,7 @@ def lsim(
     sys: DiscLTI,
     us: Array,  # (T, m) input sequence
     x0: Array | None = None,  # (n,) initial state; defaults to zeros
-) -> tuple[Array, Array, Array]:
+) -> SimResult:
     """Simulate a discrete system in open loop from an input sequence.
 
     Mirrors MATLAB-style `lsim()` for the current discrete state-space surface.
@@ -84,8 +85,8 @@ def lsim(
         x0: Initial state. Shape: `(n,)`. Defaults to zeros.
 
     Returns:
-        tuple[Array, Array, Array]: Simulation outputs `(ts, xs, ys)`. Shapes:
-        `(T,)`, `(T + 1, n)`, and `(T, p)`.
+        SimResult: Simulation result with `.ts`, `.xs`, `.ys`. Shapes:
+        `(T,)`, `(T + 1, n)`, and `(T, p)`. Supports tuple unpacking.
 
     Examples:
         >>> import jax.numpy as jnp
@@ -97,7 +98,8 @@ def lsim(
         ...     jnp.zeros((2, 1)),
         ...     dt=0.1,
         ... )
-        >>> ts, xs, ys = cx.lsim(sys, jnp.zeros((20, 1)))
+        >>> result = cx.lsim(sys, jnp.zeros((20, 1)))
+        >>> ts, xs, ys = result  # or use result.ts, result.xs, result.ys
     """
     n = sys.A.shape[0]
     if x0 is None:
@@ -113,7 +115,7 @@ def lsim(
 
     _, (xs, ys) = jax.lax.scan(step, x0, us)
     xs_full = jnp.concatenate([x0[None], xs], axis=0)
-    return ts, xs_full, ys
+    return SimResult(ts, xs_full, ys)
 
 
 def _simulate_discrete(
@@ -324,7 +326,7 @@ def simulate(
     solver: Any = None,
     adjoint: Any = None,
     dt0: float | None = None,
-) -> tuple[Array, Array, Array]:
+) -> SimResult:
     """Simulate a system in closed loop under a control policy.
 
     Evaluates `policy(t, x)` along the system trajectory and dispatches to the
@@ -354,11 +356,10 @@ def simulate(
         dt0: Continuous-only initial solver step size hint.
 
     Returns:
-        tuple[Array, Array, Array]: Simulation outputs `(ts, xs, ys)`. Shapes:
-        for [DiscLTI][contrax.systems.DiscLTI], `(T,)`, `(T + 1, n)`, and
-        `(T, p)`; for [ContLTI][contrax.systems.ContLTI], `(N,)`, `(N, n)`,
-        and `(N, p)` where `N` is the number of saved samples on the
-        continuous output grid.
+        SimResult: Simulation result with `.ts`, `.xs`, `.ys`. Supports tuple
+        unpacking. For [DiscLTI][contrax.systems.DiscLTI], shapes are `(T,)`,
+        `(T + 1, n)`, and `(T, p)`; for continuous systems, `(N,)`, `(N, n)`,
+        and `(N, p)` where `N` is the number of saved samples on the output grid.
 
     Examples:
         >>> import jax.numpy as jnp
@@ -383,7 +384,7 @@ def simulate(
             raise ValueError("simulate() for DiscLTI requires num_steps, not duration.")
         if num_steps is None:
             raise ValueError("simulate() for DiscLTI requires num_steps.")
-        return _simulate_discrete(sys, x0, policy, int(num_steps))
+        return SimResult(*_simulate_discrete(sys, x0, policy, int(num_steps)))
     if isinstance(sys, (NonlinearSystem, PHSSystem)) and sys.dt is not None:
         if duration is not None:
             raise ValueError(
@@ -394,7 +395,7 @@ def simulate(
             raise ValueError(
                 "simulate() for discrete nonlinear systems requires num_steps."
             )
-        return _simulate_nonlinear_discrete(sys, x0, policy, int(num_steps))
+        return SimResult(*_simulate_nonlinear_discrete(sys, x0, policy, int(num_steps)))
     if num_steps is not None:
         if isinstance(sys, ContLTI):
             raise ValueError("simulate() for ContLTI requires duration, not num_steps.")
@@ -408,15 +409,17 @@ def simulate(
         raise ValueError(
             "simulate() for continuous nonlinear systems requires duration."
         )
-    return _simulate_continuous(
-        sys,
-        x0,
-        policy,
-        float(duration),
-        dt=dt,
-        solver=solver,
-        adjoint=adjoint,
-        dt0=dt0,
+    return SimResult(
+        *_simulate_continuous(
+            sys,
+            x0,
+            policy,
+            float(duration),
+            dt=dt,
+            solver=solver,
+            adjoint=adjoint,
+            dt0=dt0,
+        )
     )
 
 
@@ -438,7 +441,7 @@ def step_response(
     solver: Any = None,
     adjoint: Any = None,
     dt0: float | None = None,
-) -> tuple[Array, Array]:
+) -> SimResult:
     """Compute the unit-step response of an LTI system.
 
     This is the standard control sanity-check response: apply a unit step on
@@ -464,12 +467,13 @@ def step_response(
         dt0: Continuous-only initial solver step size hint.
 
     Returns:
-        tuple[Array, Array]: Sample times and output trajectory `(ts, ys)`.
+        SimResult: Simulation result with `.ts`, `.xs`, `.ys`. Supports tuple
+        unpacking as ``ts, xs, ys = cx.step_response(...)``.
     """
     n = sys.A.shape[0]
     x0 = jnp.zeros(n, dtype=sys.A.dtype) if x0 is None else x0
     u_step = _unit_input(sys, input_index)
-    ts, _, ys = simulate(
+    return simulate(
         sys,
         x0,
         lambda t, x: u_step,
@@ -480,7 +484,6 @@ def step_response(
         adjoint=adjoint,
         dt0=dt0,
     )
-    return ts, ys
 
 
 def impulse_response(
@@ -494,7 +497,7 @@ def impulse_response(
     solver: Any = None,
     adjoint: Any = None,
     dt0: float | None = None,
-) -> tuple[Array, Array]:
+) -> SimResult:
     """Compute the impulse response of an LTI system.
 
     For discrete systems this applies a unit pulse at `k=0`. For continuous
@@ -519,7 +522,8 @@ def impulse_response(
         dt0: Continuous-only initial solver step size hint.
 
     Returns:
-        tuple[Array, Array]: Sample times and output trajectory `(ts, ys)`.
+        SimResult: Simulation result with `.ts`, `.xs`, `.ys`. Supports tuple
+        unpacking as ``ts, xs, ys = cx.impulse_response(...)``.
     """
     n = sys.A.shape[0]
     x0 = jnp.zeros(n, dtype=sys.A.dtype) if x0 is None else x0
@@ -535,8 +539,7 @@ def impulse_response(
         T_int = int(num_steps)
         us = jnp.zeros((T_int, sys.B.shape[1]), dtype=sys.B.dtype)
         us = us.at[0].set(u_impulse)
-        ts, _, ys = lsim(sys, us, x0=x0)
-        return ts, ys
+        return lsim(sys, us, x0=x0)
 
     if num_steps is not None:
         raise ValueError(
@@ -545,7 +548,7 @@ def impulse_response(
     if duration is None:
         raise ValueError("impulse_response() for ContLTI requires duration.")
     x0_impulse = x0 + sys.B[:, input_index]
-    ts, _, ys = simulate(
+    return simulate(
         sys,
         x0_impulse,
         lambda t, x: jnp.zeros(sys.B.shape[1], dtype=sys.B.dtype),
@@ -555,7 +558,6 @@ def impulse_response(
         adjoint=adjoint,
         dt0=dt0,
     )
-    return ts, ys
 
 
 def initial_response(
@@ -568,7 +570,7 @@ def initial_response(
     solver: Any = None,
     adjoint: Any = None,
     dt0: float | None = None,
-) -> tuple[Array, Array]:
+) -> SimResult:
     """Compute the zero-input response from a nonzero initial state.
 
     This is the third standard inspection response alongside step and impulse.
@@ -584,9 +586,10 @@ def initial_response(
         dt0: Continuous-only initial solver step size hint.
 
     Returns:
-        tuple[Array, Array]: Sample times and output trajectory `(ts, ys)`.
+        SimResult: Simulation result with `.ts`, `.xs`, `.ys`. Supports tuple
+        unpacking as ``ts, xs, ys = cx.initial_response(...)``.
     """
-    ts, _, ys = simulate(
+    return simulate(
         sys,
         x0,
         lambda t, x: jnp.zeros(sys.B.shape[1], dtype=sys.B.dtype),
@@ -597,7 +600,6 @@ def initial_response(
         adjoint=adjoint,
         dt0=dt0,
     )
-    return ts, ys
 
 
 def as_ode_term(

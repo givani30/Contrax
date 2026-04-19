@@ -62,34 +62,43 @@ def _care_residual(A, B, Q, R, S):
 
 
 def test_place_gain_matches_octave(disc_sys):
-    """L ~ [15.07, 27.19, 17.77]. Octave: place(Phi,Gamma,[p1,p2,p3]).
+    """K ~ [15.07, 27.19, 17.77]. Octave: place(Phi,Gamma,[p1,p2,p3]).
 
     Design: zeta=0.6901, omega=1 rad/s, third pole at 0.2*|dominant|.
     (SC42095 Assignment 21, Section 5 uses the same design objectives but a
     different MATLAB-internal state-space realization, giving different numbers.)
     """
     poles = _desired_poles()
-    L = cx.place(disc_sys, poles)
-    L_expected = jnp.array([[15.0789, 27.1937, 17.7725]])
-    assert jnp.allclose(L, L_expected, atol=0.1), (
-        f"Pole placement mismatch.\n  got:      {L}\n  expected: {L_expected}"
+    result = cx.place(disc_sys, poles)
+    K_expected = jnp.array([[15.0789, 27.1937, 17.7725]])
+    assert jnp.allclose(result.K, K_expected, atol=0.1), (
+        f"Pole placement mismatch.\n  got:      {result.K}\n  expected: {K_expected}"
     )
 
 
 def test_place_achieves_desired_poles(disc_sys):
     """Closed-loop eigenvalue magnitudes after place() must match targets."""
     poles = _desired_poles()
-    L = cx.place(disc_sys, poles)
-    cl_sys = cx.feedback(disc_sys, L)
+    result = cx.place(disc_sys, poles)
+    cl_sys = cx.feedback(disc_sys, result.K)
     actual = np.sort(np.abs(np.linalg.eigvals(np.array(cl_sys.A))))
     expected = np.sort(np.abs(poles))
     np.testing.assert_allclose(actual, expected, atol=1e-4)
 
 
+def test_place_result_poles_match_closed_loop(disc_sys):
+    """PlaceResult.poles should match the achieved closed-loop eigenvalues."""
+    poles = _desired_poles()
+    result = cx.place(disc_sys, poles)
+    actual = np.sort(np.abs(np.array(result.poles)))
+    expected = np.sort(np.abs(poles))
+    np.testing.assert_allclose(actual, expected, atol=1e-4)
+
+
 def test_state_feedback_matches_feedback_alias(disc_sys):
-    L = cx.place(disc_sys, _desired_poles())
-    via_explicit_name = cx.state_feedback(disc_sys, L)
-    via_alias = cx.feedback(disc_sys, L)
+    K = cx.place(disc_sys, _desired_poles()).K
+    via_explicit_name = cx.state_feedback(disc_sys, K)
+    via_alias = cx.feedback(disc_sys, K)
 
     assert jnp.allclose(via_explicit_name.A, via_alias.A, atol=1e-12)
     assert jnp.allclose(via_explicit_name.B, via_alias.B, atol=1e-12)
@@ -98,8 +107,8 @@ def test_state_feedback_matches_feedback_alias(disc_sys):
 
 
 def test_place_shape(disc_sys):
-    L = cx.place(disc_sys, _desired_poles())
-    assert L.shape == (1, 3)
+    result = cx.place(disc_sys, _desired_poles())
+    assert result.K.shape == (1, 3)
 
 
 def test_place_mimo_achieves_requested_real_poles():
@@ -112,11 +121,11 @@ def test_place_mimo_achieves_requested_real_poles():
     )
     poles = jnp.array([0.5, 0.6])
 
-    L = cx.place(sys, poles)
-    cl = cx.feedback(sys, L)
+    result = cx.place(sys, poles)
+    cl = cx.feedback(sys, result.K)
     actual = np.sort_complex(np.linalg.eigvals(np.array(cl.A)))
 
-    assert L.shape == (2, 2)
+    assert result.K.shape == (2, 2)
     np.testing.assert_allclose(actual, np.sort_complex(np.array(poles)), atol=1e-8)
 
 
@@ -129,8 +138,8 @@ def test_place_continuous_double_integrator_achieves_desired_poles():
     )
     poles = jnp.array([-1.0, -2.0])
 
-    L = cx.place(sys, poles)
-    cl = cx.feedback(sys, L)
+    result = cx.place(sys, poles)
+    cl = cx.feedback(sys, result.K)
     actual = np.sort_complex(np.linalg.eigvals(np.array(cl.A)))
 
     np.testing.assert_allclose(actual, np.sort_complex(np.array(poles)), atol=1e-8)
@@ -145,8 +154,8 @@ def test_place_continuous_mimo_complex_pair_uses_yt_path():
     )
     poles = jnp.asarray(np.array([-0.2 + 1.2j, -0.2 - 1.2j, -1.5]))
 
-    L = cx.place(sys, poles)
-    cl = cx.feedback(sys, L)
+    result = cx.place(sys, poles)
+    cl = cx.feedback(sys, result.K)
     actual = np.sort_complex(np.linalg.eigvals(np.array(cl.A)))
 
     np.testing.assert_allclose(actual, np.sort_complex(np.array(poles)), atol=1e-8)
@@ -162,8 +171,8 @@ def test_place_clustered_real_poles_matches_targets():
     )
     poles = jnp.array([0.7, 0.701, 0.702])
 
-    L = cx.place(sys, poles)
-    cl = cx.feedback(sys, L)
+    result = cx.place(sys, poles)
+    cl = cx.feedback(sys, result.K)
     actual = np.sort_complex(np.linalg.eigvals(np.array(cl.A)))
 
     np.testing.assert_allclose(actual, np.sort_complex(np.array(poles)), atol=1e-8)
@@ -173,8 +182,8 @@ def test_place_clustered_real_poles_matches_targets():
 
 
 def test_feedback_closed_loop_stable(disc_sys):
-    L = cx.place(disc_sys, _desired_poles())
-    cl = cx.feedback(disc_sys, L)
+    K = cx.place(disc_sys, _desired_poles()).K
+    cl = cx.feedback(disc_sys, K)
     eigs = jnp.abs(jnp.linalg.eigvals(cl.A))
     assert jnp.all(eigs < 1.0), f"Closed-loop unstable: {eigs}"
 

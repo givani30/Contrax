@@ -185,7 +185,7 @@ def test_ekf_matches_kalman_for_linear_system():
 
     kf = cx.kalman(sys, Q, R, ys, x0=x0, P0=P0)
 
-    def f(x, u):
+    def f(t, x, u):
         return sys.A @ x + sys.B @ u
 
     def h(x):
@@ -252,7 +252,7 @@ def test_ekf_step_matches_batch_filter():
     batch = cx.ekf(nonlinear, Q, R, ys, us, x0, P0)
 
     # Step 0: update x0 directly (x0 is prior on x_0)
-    def f(x, u):
+    def f(t, x, u):
         return sys.A @ x + sys.B @ u
 
     def h(x):
@@ -296,7 +296,7 @@ def test_ekf_step_can_skip_missing_measurement_under_jit():
     x = jnp.array([1.0])
     P = jnp.array([[0.5]])
 
-    def f(x, u):
+    def f(t, x, u):
         return jnp.array([0.8 * x[0] + u[0]])
 
     def h(x):
@@ -538,7 +538,7 @@ def test_ukf_matches_kalman_for_linear_system():
 
     kf = cx.kalman(sys, Q, R, ys, x0=x0, P0=P0)
 
-    def f(x, u):
+    def f(t, x, u):
         return sys.A @ x + sys.B @ u
 
     def h(x):

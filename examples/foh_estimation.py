@@ -91,8 +91,8 @@ def run_ekf(xs_true, ys, us_foh):
     def h(x):
         return x[:1]
 
-    def f_foh(x, u_pair):
-        return discrete_foh.dynamics(0.0, x, u_pair)
+    def f_foh(t, x, u_pair):
+        return discrete_foh.dynamics(t, x, u_pair)
 
     x = ys[0, :1]  # initialise from first measurement
     x = jnp.concatenate([x, jnp.zeros(1)])

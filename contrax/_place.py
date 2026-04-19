@@ -6,6 +6,7 @@ from jax import Array
 from jax.typing import ArrayLike
 
 from contrax.core import ContLTI, DiscLTI
+from contrax.types import PlaceResult
 
 
 def _ctrb_matrix(A: Array, B: Array) -> Array:
@@ -337,7 +338,7 @@ def place(
     method: str | None = None,
     rtol: float = 1e-3,
     maxiter: int = 30,
-) -> Array:
+) -> PlaceResult:
     """Place closed-loop poles for a state-space system.
 
     Uses a JAX-native robust assignment path based on KNV0 for real-pole cases
@@ -359,7 +360,9 @@ def place(
         maxiter: Maximum robust-assignment iterations.
 
     Returns:
-        Array: State-feedback gain `L`. Shape: `(m, n)`.
+        PlaceResult: Result with `.K` (state-feedback gain, shape `(m, n)`)
+        and `.poles` (achieved closed-loop eigenvalues). Supports tuple
+        unpacking: ``K, poles = cx.place(...)``.
 
     Examples:
         >>> import jax.numpy as jnp
@@ -370,7 +373,8 @@ def place(
         ...     jnp.eye(2),
         ...     jnp.zeros((2, 1)),
         ... )
-        >>> L = cx.place(sys, jnp.array([0.6, 0.7]))
+        >>> result = cx.place(sys, jnp.array([0.6, 0.7]))
+        >>> K = result.K  # or: K, achieved_poles = cx.place(...)
     """
     A, B = sys.A, sys.B
     poles_ordered = _order_complex_poles(poles)
@@ -378,7 +382,7 @@ def place(
     chosen_method = method or ("YT" if has_complex else "KNV0")
 
     try:
-        return _place_robust(
+        K = _place_robust(
             A,
             B,
             poles_ordered,
@@ -388,5 +392,8 @@ def place(
         )
     except Exception:
         if B.shape[1] == 1:
-            return _place_ackermann(A, B, poles_ordered)
-        raise
+            K = _place_ackermann(A, B, poles_ordered)
+        else:
+            raise
+    achieved_poles = jnp.linalg.eigvals(A - B @ K)
+    return PlaceResult(K=K, poles=achieved_poles)

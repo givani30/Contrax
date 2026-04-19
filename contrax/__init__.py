@@ -94,7 +94,9 @@ from contrax.types import (
     LQRResult,
     MHEResult,
     PHSStructureDiagnostics,
+    PlaceResult,
     RTSResult,
+    SimResult,
     SmootherDiagnostics,
     UKFResult,
 )
@@ -184,6 +186,8 @@ __all__ = [
     "spd_from_cholesky_raw",
     "diagonal_spd",
     # result types
+    "SimResult",
+    "PlaceResult",
     "LQRResult",
     "InnovationDiagnostics",
     "SmootherDiagnostics",

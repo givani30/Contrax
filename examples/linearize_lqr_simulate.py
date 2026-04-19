@@ -18,7 +18,7 @@ import contrax as cx
 
 
 # --8<-- [start:dynamics]
-def pendulum(x, u):
+def pendulum(t, x, u):
     theta, theta_dot = x
     torque = u[0]
     return jnp.array([theta_dot, -jnp.sin(theta) + torque])

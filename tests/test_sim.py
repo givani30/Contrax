@@ -501,7 +501,7 @@ def test_step_response_discrete_matches_lsim_with_unit_step(disc_sys):
     T = 12
     us = jnp.ones((T, 1))
 
-    ts_step, ys_step = cx.step_response(disc_sys, num_steps=T)
+    ts_step, _, ys_step = cx.step_response(disc_sys, num_steps=T)
     ts_lsim, _, ys_lsim = cx.lsim(disc_sys, us)
 
     assert jnp.allclose(ts_step, ts_lsim, atol=1e-12)
@@ -512,7 +512,7 @@ def test_impulse_response_discrete_matches_lsim_with_unit_pulse(disc_sys):
     T = 12
     us = jnp.zeros((T, 1)).at[0].set(1.0)
 
-    ts_imp, ys_imp = cx.impulse_response(disc_sys, num_steps=T)
+    ts_imp, _, ys_imp = cx.impulse_response(disc_sys, num_steps=T)
     ts_lsim, _, ys_lsim = cx.lsim(disc_sys, us)
 
     assert jnp.allclose(ts_imp, ts_lsim, atol=1e-12)
@@ -524,7 +524,7 @@ def test_initial_response_discrete_matches_lsim_with_zero_input(disc_sys):
     T = 12
     us = jnp.zeros((T, 1))
 
-    ts_init, ys_init = cx.initial_response(disc_sys, x0, num_steps=T)
+    ts_init, _, ys_init = cx.initial_response(disc_sys, x0, num_steps=T)
     ts_lsim, _, ys_lsim = cx.lsim(disc_sys, us, x0=x0)
 
     assert jnp.allclose(ts_init, ts_lsim, atol=1e-12)
@@ -539,7 +539,7 @@ def test_step_response_continuous_matches_simulate_with_constant_input():
         D=jnp.zeros((1, 1)),
     )
 
-    ts_step, ys_step = cx.step_response(sys, duration=1.0, dt=0.1)
+    ts_step, _, ys_step = cx.step_response(sys, duration=1.0, dt=0.1)
     ts_sim, _, ys_sim = cx.simulate(
         sys, jnp.zeros(1), lambda t, x: jnp.ones(1), duration=1.0, dt=0.1
     )
@@ -556,7 +556,7 @@ def test_impulse_response_continuous_matches_state_jump_convention():
         D=jnp.zeros((1, 1)),
     )
 
-    ts, ys = cx.impulse_response(sys, duration=1.0, dt=0.1)
+    ts, _, ys = cx.impulse_response(sys, duration=1.0, dt=0.1)
     expected = 6.0 * jnp.exp(-ts)
 
     assert jnp.allclose(ys[:, 0], expected, atol=1e-5, rtol=1e-5)
@@ -571,7 +571,7 @@ def test_initial_response_continuous_matches_zero_input_simulate():
     )
     x0 = jnp.array([2.0])
 
-    ts_init, ys_init = cx.initial_response(sys, x0, duration=1.0, dt=0.1)
+    ts_init, _, ys_init = cx.initial_response(sys, x0, duration=1.0, dt=0.1)
     ts_sim, _, ys_sim = cx.simulate(
         sys, x0, lambda t, x: jnp.zeros(1), duration=1.0, dt=0.1
     )
@@ -641,7 +641,7 @@ def test_simulate_continuous_rejects_num_steps_keyword(cont_sys):
 def test_vmap_linearize_c2d_lqr_over_operating_points():
     """Small gain-scheduling workflow: vmap(linearize -> c2d -> lqr)."""
 
-    def pendulum(x, u):
+    def pendulum(t, x, u):
         return jnp.array([x[1], -jnp.sin(x[0]) + u[0]])
 
     def sensor(x, u):

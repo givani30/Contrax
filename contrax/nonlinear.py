@@ -21,6 +21,12 @@ class NonlinearSystem(eqx.Module):
     The constructor keeps the underlying field name `observation` so existing
     pytrees stay stable, while the public constructor prefers the more
     control-oriented `output=` spelling.
+
+    **Estimator integration:** Pass a `NonlinearSystem` directly to
+    `ekf()`, `ukf()`, `ekf_step()`, etc. Do **not** pass `sys.dynamics`
+    separately — that function takes `(t, x, u)` while the plain-function
+    estimator path expects `(x, u)`. Passing the system object lets Contrax
+    wrap the signature correctly.
     """
 
     dynamics: Callable
@@ -47,9 +53,9 @@ class SupportsNonlinearSystem(Protocol):
     def output(self, t: Array | float, x: Array, u: Array) -> Array: ...
 
 
-DynamicsFn: TypeAlias = Callable[[Array, Array], Array]
-ObservationFn: TypeAlias = Callable[[Array], Array]
-OutputFn: TypeAlias = Callable[[Array, Array], Array]
+DynamicsFn: TypeAlias = Callable[[Array, Array, Array], Array]  # (t, x, u) → x_next
+ObservationFn: TypeAlias = Callable[[Array], Array]             # h(x) → y
+OutputFn: TypeAlias = Callable[[Array, Array], Array]           # output(x, u) → y
 DynamicsLike: TypeAlias = SupportsNonlinearSystem | DynamicsFn
 ObservationLike: TypeAlias = SupportsNonlinearSystem | ObservationFn
 
@@ -79,9 +85,13 @@ def nonlinear_system(
         observation: Deprecated synonym for `output`. Pass only one of
             `output` or `observation`.
         dt: Optional discrete sample time. Omit for continuous models.
-        state_dim: Optional static state dimension metadata.
-        input_dim: Optional static input dimension metadata.
-        output_dim: Optional static output dimension metadata.
+        state_dim: Optional static state dimension hint. Contrax does not
+            require this — dimensions are inferred from the matrices passed to
+            `lqr`, `ekf`, etc. Useful only as documentation metadata.
+        input_dim: Optional static input dimension hint. Same caveat as
+            `state_dim`.
+        output_dim: Optional static output dimension hint. Same caveat as
+            `state_dim`.
 
     Returns:
         [NonlinearSystem][contrax.systems.NonlinearSystem]: A reusable
@@ -115,25 +125,25 @@ def _system_dt(sys: object) -> Array | None:
 
 def _coerce_dynamics(
     model_or_f: DynamicsLike,
-) -> Callable[[Array, Array, Array | float], Array]:
-    """Normalize a system model or plain dynamics function to `(x, u, t)`."""
+) -> Callable[[Array | float, Array, Array], Array]:
+    """Return a `(t, x, u) → x_next` callable from a system model or plain function."""
     if _is_system_model(model_or_f):
-        return lambda x, u, t: model_or_f.dynamics(t, x, u)
-    return lambda x, u, t: model_or_f(x, u)
+        return model_or_f.dynamics  # already (t, x, u)
+    return model_or_f  # must be (t, x, u)
 
 
 def _coerce_observation(
     model_or_h: ObservationLike,
     h: ObservationFn | None = None,
-) -> Callable[[Array, Array, Array | float], Array]:
-    """Normalize a system model or plain observation function to `(x, u, t)`."""
+) -> Callable[[Array | float, Array, Array], Array]:
+    """Return a `(t, x, u) → y` callable from a system model or plain h(x)."""
     if _is_system_model(model_or_h):
-        return lambda x, u, t: model_or_h.output(t, x, u)
+        return model_or_h.output  # already (t, x, u)
     if h is None:
         raise ValueError(
             "An observation function is required for nonlinear estimation."
         )
-    return lambda x, u, t: h(x)
+    return lambda t, x, u: h(x)
 
 
 __all__ = [

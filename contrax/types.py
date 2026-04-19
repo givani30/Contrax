@@ -4,6 +4,43 @@ import equinox as eqx
 from jax import Array
 
 
+class SimResult(eqx.Module):
+    """Result bundle for simulation functions.
+
+    Attributes:
+        ts: Sample times. Shape: `(T,)` or `(N,)` for continuous.
+        xs: State trajectory including the initial state. Shape: `(T+1, n)`
+            for discrete, `(N, n)` for continuous.
+        ys: Output trajectory. Shape: `(T, p)` or `(N, p)`.
+
+    Supports tuple unpacking: ``ts, xs, ys = cx.simulate(...)``
+    """
+
+    ts: Array
+    xs: Array
+    ys: Array
+
+    def __iter__(self):
+        return iter((self.ts, self.xs, self.ys))
+
+
+class PlaceResult(eqx.Module):
+    """Result bundle for pole placement.
+
+    Attributes:
+        K: State-feedback gain. Shape: `(m, n)`.
+        poles: Achieved closed-loop eigenvalues. Shape: `(n,)`.
+
+    Supports tuple unpacking: ``K, poles = cx.place(...)``
+    """
+
+    K: Array
+    poles: Array
+
+    def __iter__(self):
+        return iter((self.K, self.poles))
+
+
 class LQRResult(eqx.Module):
     """Result bundle for LQR, DARE, and CARE computations.
 
@@ -196,6 +233,8 @@ class LikelihoodDiagnostics(eqx.Module):
 
 
 __all__ = [
+    "SimResult",
+    "PlaceResult",
     "LQRResult",
     "KalmanGainResult",
     "KalmanResult",

@@ -132,7 +132,7 @@ def ukf(
     Examples:
         >>> import jax.numpy as jnp
         >>> import contrax as cx
-        >>> def f(x, u):
+        >>> def f(t, x, u):
         ...     return jnp.array([x[0] + 0.1 * x[1], x[1] + u[0]])
         >>> def h(x):
         ...     return jnp.array([x[0] ** 2])
@@ -176,7 +176,7 @@ def ukf(
 
         # Update: unscented transform through h using the current prior.
         sigma_obs, Wm_obs, Wc_obs = _sigma_points(x_prior, P_prior, alpha, beta, kappa)
-        y_sigma = jax.vmap(lambda s: h(s, u, t))(sigma_obs)
+        y_sigma = jax.vmap(lambda s: h(t, s, u))(sigma_obs)
         y_pred = jnp.einsum("i,ij->j", Wm_obs, y_sigma)
         y_centered = y_sigma - y_pred
         S = _weighted_covariance(y_centered, Wc_obs) + R_noise
@@ -191,7 +191,7 @@ def ukf(
 
         # Predict: unscented transform through f from the posterior.
         sigma, Wm, Wc = _sigma_points(x_post, P_post, alpha, beta, kappa)
-        sigma_pred = jax.vmap(lambda s: f(s, u, t))(sigma)
+        sigma_pred = jax.vmap(lambda s: f(t, s, u))(sigma)
         x_next = jnp.einsum("i,ij->j", Wm, sigma_pred)
         sigma_pred_centered = sigma_pred - x_next
         P_next = _weighted_covariance(sigma_pred_centered, Wc) + Q_noise

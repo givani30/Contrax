@@ -29,8 +29,9 @@ def ekf_predict(
     """Predict one extended Kalman filter step.
 
     Args:
-        model_or_f: Nonlinear system model or dynamics function mapping
-            `(x, u)` to the next state.
+        model_or_f: A `NonlinearSystem` or a plain dynamics function with
+            signature `(t, x, u) -> x_next`. Both signatures are now the same,
+            so `sys.dynamics` can be passed directly when using a system model.
         x: Filtered mean at the previous time step. Shape: `(n,)`.
         P: Filtered covariance at the previous time step. Shape: `(n, n)`.
         u: Current input. Shape: `(m,)`.
@@ -41,8 +42,8 @@ def ekf_predict(
         Tuple `(x_pred, P_pred)` with the predicted mean and covariance.
     """
     f = _coerce_dynamics(model_or_f)
-    x_pred = f(x, u, t)
-    F = jax.jacfwd(f, argnums=0)(x, u, t)
+    x_pred = f(t, x, u)
+    F = jax.jacfwd(f, argnums=1)(t, x, u)
     P_pred = _symmetrize(F @ P @ F.T + Q_noise)
     return x_pred, P_pred
 
@@ -93,10 +94,10 @@ def ekf_update(
     # Theory"; the iterated EKF relinearizes the measurement model around the
     # current update iterate while keeping the prediction covariance fixed.
     def one_iteration(x_lin, _):
-        H = jax.jacfwd(h, argnums=0)(x_lin, u, t)
+        H = jax.jacfwd(h, argnums=1)(t, x_lin, u)
         S = H @ P_pred @ H.T + R_noise
         K = jnp.linalg.solve(S.T, (P_pred @ H.T).T).T
-        innov = y - h(x_lin, u, t) + H @ (x_lin - x_pred)
+        innov = y - h(t, x_lin, u) + H @ (x_lin - x_pred)
         x_next = x_pred + K @ innov
         return x_next, (x_next, H, K, innov)
 
@@ -218,7 +219,7 @@ def ekf(
     Examples:
         >>> import jax.numpy as jnp
         >>> import contrax as cx
-        >>> def f(x, u):
+        >>> def f(t, x, u):
         ...     return jnp.array([x[0] + 0.1 * x[1], x[1] + u[0]])
         >>> def h(x):
         ...     return x[:1]

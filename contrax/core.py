@@ -295,107 +295,69 @@ def linearize(
     x0: Array,
     u0: Array,
     *,
-    t: ArrayLike = 0.0,
-) -> tuple[Array, Array]:
-    """Linearize a dynamics function around an operating point.
-
-    Computes the Jacobians `A = df/dx` and `B = df/du` at `(x0, u0)` using
-    forward-mode automatic differentiation.
-
-    This is one of the main JAX-native workflow bridges in Contrax. It works
-    cleanly with `jit`, `vmap`, and differentiation as long as `f` is written
-    as a pure JAX function without Python control flow over traced values.
-
-    Args:
-        model_or_f: A nonlinear system model or pure JAX dynamics function
-            mapping `(x, u)` to `x_dot` or `x_next`.
-        x0: State operating point. Shape: `(n,)`.
-        u0: Input operating point. Shape: `(m,)`.
-        t: Operating-point time for system-model linearization.
-
-    Returns:
-        tuple[Array, Array]: Jacobian pair `(A, B)`. Shapes: `(n, n)` and
-        `(n, m)`.
-
-    Examples:
-        >>> import jax.numpy as jnp
-        >>> import contrax as cx
-        >>> def dynamics(x, u):
-        ...     return jnp.array([x[1], -jnp.sin(x[0]) + u[0]])
-        >>> A, B = cx.linearize(dynamics, jnp.zeros(2), jnp.zeros(1))
-    """
-    f = _coerce_dynamics(model_or_f)
-    t = jnp.asarray(t, dtype=x0.dtype)
-    A = jax.jacfwd(f, argnums=0)(x0, u0, t)
-    B = jax.jacfwd(f, argnums=1)(x0, u0, t)
-    return A, B
-
-
-def linearize_ss(
-    model_or_f: DynamicsLike,
-    x0: Array,
-    u0: Array,
-    *,
     output: OutputFn | None = None,
     t: ArrayLike = 0.0,
 ) -> ContLTI:
     """Linearize dynamics and output maps into a continuous state-space model.
 
-    Computes `A`, `B`, `C`, and `D` Jacobians at `(x0, u0)` and returns them as
-    a [ContLTI][contrax.systems.ContLTI].
+    Computes `A`, `B`, `C`, and `D` Jacobians at `(x0, u0)` using forward-mode
+    automatic differentiation and returns them as a
+    [ContLTI][contrax.systems.ContLTI].
 
     This is the main bridge from nonlinear plant code into the linear control
-    stack. Pair it with `c2d()` and `lqr()` when building local controllers
-    around an operating point.
+    stack. A common workflow is:
+
+    ```python
+    sys_lin = cx.linearize(nonlinear_sys, x_eq, u_eq)
+    sys_d   = cx.c2d(sys_lin, dt=0.05)
+    K       = cx.lqr(sys_d, Q, R).K
+    cx.simulate(nonlinear_sys, x0, lambda t, x: -K @ x, ...)
+    ```
 
     Args:
-        model_or_f: A nonlinear system model or pure JAX dynamics function
-            mapping `(x, u)` to `x_dot`.
+        model_or_f: A `NonlinearSystem` or a pure JAX dynamics function with
+            signature `(t, x, u) → x_dot`.
         x0: State operating point. Shape: `(n,)`.
         u0: Input operating point. Shape: `(m,)`.
-        output: Output function mapping `(x, u)` to `y` when `model_or_f` is a
-            plain dynamics callable. Omit this when passing a system model with
-            its own output map.
-        t: Operating-point time for system-model linearization.
+        output: Output function `(x, u) → y` for plain dynamics callables.
+            When omitted, defaults to the full state (`C = I`, `D = 0`).
+            Omit this when passing a system model with its own output map.
+        t: Operating-point time. Relevant for time-varying system models.
 
     Returns:
-        [ContLTI][contrax.systems.ContLTI]: A continuous-time state-space
-            model with linearized `A`, `B`, `C`, and `D` matrices.
+        [ContLTI][contrax.systems.ContLTI]: Linearized continuous-time
+            state-space model with Jacobian matrices `A`, `B`, `C`, `D`.
 
     Examples:
         >>> import jax.numpy as jnp
         >>> import contrax as cx
-        >>> def dynamics(x, u):
+        >>> def dynamics(t, x, u):
         ...     return jnp.array([x[1], -jnp.sin(x[0]) + u[0]])
-        >>> def output(x, u):
-        ...     return x
-        >>> sys_c = cx.linearize_ss(
-        ...     dynamics,
-        ...     jnp.zeros(2),
-        ...     jnp.zeros(1),
-        ...     output=output,
-        ... )
+        >>> sys_lin = cx.linearize(dynamics, jnp.zeros(2), jnp.zeros(1))
     """
+    t_arr = jnp.asarray(t, dtype=x0.dtype)
+
     if _is_system_model(model_or_f):
         if output is not None:
-            raise ValueError("linearize_ss(sys, x0, u0) does not accept output=.")
-        sys = model_or_f
-        f = _coerce_dynamics(sys)
-        h = _coerce_observation(sys)
+            raise ValueError("linearize(sys, x0, u0) does not accept output=.")
+        f = model_or_f.dynamics
+        h = model_or_f.output
     else:
-        if output is None:
-            raise ValueError(
-                "linearize_ss(f, x0, u0, output=...) requires an output function."
-            )
-        f = _coerce_dynamics(model_or_f)
+        f = model_or_f
+        if output is not None:
+            def h(t_: Array, x: Array, u_: Array) -> Array:
+                del t_
+                return output(x, u_)
+        else:
+            def h(t_: Array, x: Array, u_: Array) -> Array:
+                del t_, u_
+                return x
 
-        def h(x: Array, u: Array, t_: Array) -> Array:
-            del t_
-            return output(x, u)
-
-    t = jnp.asarray(t, dtype=x0.dtype)
-    A = jax.jacfwd(f, argnums=0)(x0, u0, t)
-    B = jax.jacfwd(f, argnums=1)(x0, u0, t)
-    C = jax.jacfwd(h, argnums=0)(x0, u0, t)
-    D = jax.jacfwd(h, argnums=1)(x0, u0, t)
+    A = jax.jacfwd(f, argnums=1)(t_arr, x0, u0)
+    B = jax.jacfwd(f, argnums=2)(t_arr, x0, u0)
+    C = jax.jacfwd(h, argnums=1)(t_arr, x0, u0)
+    D = jax.jacfwd(h, argnums=2)(t_arr, x0, u0)
     return ContLTI(A=A, B=B, C=C, D=D)
+
+
+linearize_ss = linearize
