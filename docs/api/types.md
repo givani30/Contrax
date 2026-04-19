@@ -5,6 +5,9 @@ and estimator outputs. These types are part of the public API.
 
 Use them as named return values rather than unpacking by position:
 
+- [`SimResult`][contrax.types.SimResult] for `simulate()`, `lsim()`,
+  `step_response()`, `impulse_response()`, and `initial_response()`
+- [`PlaceResult`][contrax.types.PlaceResult] for `place()`
 - [`LQRResult`][contrax.types.LQRResult] for `dare()`, `care()`, `lqr()`, and
   `lqi()`
 - [`KalmanGainResult`][contrax.types.KalmanGainResult] for `kalman_gain()`

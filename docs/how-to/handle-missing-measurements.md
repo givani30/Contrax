@@ -14,7 +14,7 @@ Q = jnp.array([[1e-3]])
 R = jnp.array([[1e-2]])
 
 
-def f(x, u):
+def f(t, x, u):
     return jnp.array([0.8 * x[0] + u[0]])
 
 

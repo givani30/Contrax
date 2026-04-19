@@ -77,7 +77,7 @@ The main expectations are:
   not the preferred path for gradients with respect to nonsmooth event timing
 - `lqr()` on the discrete path supports finite gradients through representative
   objectives
-- vmapped workflows such as `linearize_ss -> c2d -> lqr` are part of the
+- vmapped workflows such as `linearize -> c2d -> lqr` are part of the
   intended use case
 - `place()` is a design-time helper: its numerical core is JAX-native, but
   method selection and fallback logic use ordinary Python dispatch
@@ -104,7 +104,7 @@ Contrax validates transform behavior with dedicated `jit`, `vmap`, and `grad`
 tests on representative workflows such as:
 
 - discrete simulation and filtering scans
-- `linearize_ss -> c2d -> lqr` design pipelines
+- `linearize -> c2d -> lqr` design pipelines
 - gradients through Riccati-based controller design objectives
 - continuous-time design-and-simulate examples where the solver path supports it
 

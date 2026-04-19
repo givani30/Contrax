@@ -55,6 +55,10 @@ closed_loop = cx.state_feedback(sys, result.K)
 - [`LQRResult.residual_norm`](types.md#contrax.types.LQRResult.residual_norm):
   JAX scalar Riccati residual diagnostic
 
+`place()` returns a [`PlaceResult`](types.md#contrax.types.PlaceResult) with
+`.K` (state-feedback gain, shape `(m, n)`) and `.poles` (achieved closed-loop
+eigenvalues). It supports tuple unpacking: ``K, poles = cx.place(...)``.
+
 For `lqi()`, the returned gain acts on the augmented state `[x; z]`, where `z`
 is the integral state added by `augment_integrator()`.
 

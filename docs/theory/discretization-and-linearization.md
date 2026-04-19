@@ -10,9 +10,9 @@ just for solvers.
 
 <figure class="contrax-figure">
   <img src="/assets/images/linearize-lqr-pipeline.svg"
-       alt="Pipeline from nonlinear model through linearize_ss, ContLTI, c2d, DiscLTI, and LQR design" />
+       alt="Pipeline from nonlinear model through linearize, ContLTI, c2d, DiscLTI, and LQR design" />
   <figcaption>
-    <strong>The key bridge:</strong> `linearize_ss()` turns a nonlinear model
+    <strong>The key bridge:</strong> `linearize()` turns a nonlinear model
     into a local `ContLTI`, and `c2d()` carries that local model into the most
     mature discrete controller-design path.
   </figcaption>
@@ -23,9 +23,9 @@ still the discrete Riccati slice around `dare()`.
 
 ## Linearization
 
-`linearize()` computes local Jacobians `A` and `B` around an operating point.
-`linearize_ss()` computes `A`, `B`, `C`, and `D` and returns them as a
-`ContLTI`.
+`linearize()` computes `A`, `B`, `C`, and `D` Jacobians around an operating
+point and returns them as a `ContLTI`. `linearize_ss` is an alias for
+`linearize`.
 
 The key design choice is that these are direct JAX differentiation helpers, not
 symbolic or offline preprocessing steps. That makes vmapped operating-point
@@ -33,10 +33,12 @@ sweeps and compiled local-model construction part of the intended workflow.
 
 Use:
 
-- `linearize(f, x0, u0)` when you only need the dynamics Jacobians
-- `linearize_ss(f, x0, u0, output=h)` when you have plain callables
-- `linearize_ss(sys, x0, u0)` when you want a state-space model from a
-  reusable `NonlinearSystem` or `PHSSystem`
+- `linearize(f, x0, u0)` for plain dynamics `(t, x, u) → x_dot`; defaults to
+  full-state output
+- `linearize(f, x0, u0, output=h)` when you also have an output map
+  `h(x, u) → y`
+- `linearize(sys, x0, u0)` when you have a reusable `NonlinearSystem` or
+  `PHSSystem`
 
 The local approximation is the usual first-order model around an operating
 point `(x_0, u_0)`:
@@ -107,8 +109,8 @@ $$
 
 ## Caveats
 
-- `linearize()` and `linearize_ss()` are local approximations, not global model
-  guarantees
+- `linearize()` (and its alias `linearize_ss()`) produces a local approximation,
+  not a global model guarantee
 - `c2d()` is precision-sensitive and requires `jax_enable_x64=True`
 - `zoh` is the path to prefer for serious workflows today
 - `tustin` is useful, but not the headline differentiable discretization path

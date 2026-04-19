@@ -167,18 +167,22 @@ design = cx.lqr(cx.c2d(lti, dt=0.01), Q, R)
 
 ## Linearization And Discretization
 
-`linearize()` and `linearize_ss()` are the main JAX-native bridge from
-nonlinear plant code into the linear control stack.
+`linearize()` is the main JAX-native bridge from nonlinear plant code into the
+linear control stack (`linearize_ss` is an alias).
 
 Use:
 
-- `linearize(f, x0, u0)` when you only need `A` and `B`
-- `linearize_ss(f, x0, u0, output=h)` when you have plain dynamics and output
-  callables
-- `linearize_ss(sys, x0, u0)` when you want a full local
-  [`ContLTI`][contrax.systems.ContLTI] from a reusable
+- `linearize(f, x0, u0)` when you have a plain dynamics callable with
+  signature `(t, x, u) → x_dot`; returns a
+  [`ContLTI`][contrax.systems.ContLTI] with full-state output by default
+- `linearize(f, x0, u0, output=h)` when you also want a specific output map
+  `h(x, u) → y`; `A`, `B`, `C`, `D` are all computed and packed into the
+  returned [`ContLTI`][contrax.systems.ContLTI]
+- `linearize(sys, x0, u0)` when you have a reusable
   [`NonlinearSystem`][contrax.systems.NonlinearSystem] or
-  [`PHSSystem`][contrax.systems.PHSSystem]
+  [`PHSSystem`][contrax.systems.PHSSystem]; the system's own `dynamics` and
+  `output` callables are used directly
+
 
 The local linear model is the usual first-order expansion around an operating
 point:
@@ -212,7 +216,7 @@ The `c2d()` methods are:
   <figcaption>
     <strong>The main model-preparation path:</strong> start with a nonlinear or
     structured model, build a local <a href="#contrax.systems.ContLTI"><code>ContLTI</code></a>
-    with <code>linearize_ss()</code>, discretize it with <code>c2d()</code>,
+    with <code>linearize()</code>, discretize it with <code>c2d()</code>,
     then move into controller design and validation.
   </figcaption>
 </figure>

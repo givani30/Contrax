@@ -48,12 +48,17 @@ ts, xs, ys = cx.simulate(
 - use `num_steps=...` for discrete systems
 - use `duration=...` for continuous systems
 
+All simulation functions return a [`SimResult`][contrax.types.SimResult] with
+`.ts`, `.xs`, and `.ys` fields. `SimResult` supports tuple unpacking:
+``ts, xs, ys = cx.simulate(...)``.
+
 For returned trajectories:
 
 - discrete `simulate()` returns `xs` including `x0`
 - continuous `simulate()` returns samples on a fixed save grid
-- `lsim()` returns `(ts, xs, ys)` for an open-loop input sequence
-- response helpers return `(ts, ys)`
+- `lsim()` returns a `SimResult` for an open-loop input sequence
+- response helpers (`step_response`, `impulse_response`, `initial_response`)
+  also return `SimResult` with `.ts`, `.xs`, `.ys`
 
 Use `rollout()` when there is no system object and you simply want to scan a
 transition function over a fixed input sequence.

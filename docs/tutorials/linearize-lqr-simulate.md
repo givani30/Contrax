@@ -30,7 +30,7 @@ $$
 $$
 
 and the local LQR design solves the usual discrete finite-energy objective
-after `linearize_ss() -> c2d()`:
+after `linearize() -> c2d()`:
 
 $$
 J = \sum_{k=0}^{\infty} \left(x_k^\top Q x_k + u_k^\top R u_k\right)
@@ -46,7 +46,7 @@ $$
 
 ## Linearize
 
-`linearize_ss` computes the local state and input Jacobians with JAX automatic
+`linearize` computes the local state and input Jacobians with JAX automatic
 differentiation and wraps them directly as a continuous state-space system.
 You can pass raw functions or a `nonlinear_system(...)` model object; the
 resulting local `ContLTI` is the same.
@@ -63,7 +63,7 @@ $$
 x_eq = jnp.array([0.1, 0.0])
 u_eq = jnp.array([jnp.sin(0.1)])
 
-sys_c = cx.linearize_ss(pendulum, x_eq, u_eq, output=sensor)
+sys_c = cx.linearize(pendulum, x_eq, u_eq, output=sensor)
 ```
 
 ## Build a System
@@ -135,7 +135,7 @@ checks so this tutorial stays tied to executable code.
 
 ## How To Read This Workflow In Contrax
 
-- `linearize_ss` belongs to the Systems surface because it turns a nonlinear
+- `linearize` belongs to the Systems surface because it turns a nonlinear
   model into a local state-space system.
 - `c2d` is also part of Systems because discretization is still part of model
   preparation.
@@ -147,7 +147,7 @@ checks so this tutorial stays tied to executable code.
 ## Where To Go Next
 
 - [Getting started](../getting-started.md) for the fastest route into the library
-- [Systems API](../api/systems.md) for `nonlinear_system`, `linearize_ss`, and `c2d`
+- [Systems API](../api/systems.md) for `nonlinear_system`, `linearize`, and `c2d`
 - [Control API](../api/control.md) for `lqr` and `state_feedback`
 - [Simulation API](../api/simulation.md) for closed-loop rollout conventions
 - [Batch controller design](../how-to/batch-controller-design.md) for the vmapped version of this pattern

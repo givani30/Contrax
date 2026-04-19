@@ -14,7 +14,7 @@ import jax.numpy as jnp
 import contrax as cx
 
 
-def pendulum(x, u):
+def pendulum(t, x, u):
     return jnp.array([x[1], -jnp.sin(x[0]) + u[0]])
 
 
@@ -23,7 +23,7 @@ def output(x, u):
 
 
 def design(x_eq, u_eq):
-    sys_c = cx.linearize_ss(pendulum, x_eq, u_eq, output=output)
+    sys_c = cx.linearize(pendulum, x_eq, u_eq, output=output)
     sys_d = cx.c2d(sys_c, dt=0.05)
     return cx.lqr(sys_d, jnp.eye(2), jnp.ones((1, 1))).K
 
@@ -35,10 +35,10 @@ Ks = jax.jit(jax.vmap(design))(x_eqs, u_eqs)
 
 ## Why This Recipe Works
 
-- `linearize_ss()` is designed to compose with `vmap`
+- `linearize()` is designed to compose with `vmap`
 - `DiscLTI.dt` stays as an array leaf rather than static metadata
 - the design function keeps one fixed-shape workflow:
-  `linearize_ss -> c2d -> lqr`
+  `linearize -> c2d -> lqr`
 
 ## Key Choices
 

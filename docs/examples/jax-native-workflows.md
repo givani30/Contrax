@@ -63,8 +63,8 @@ Related pages:
 
 ## 2. Turn Nonlinear Dynamics Into State-Space Models
 
-`linearize` and `linearize_ss` let you move from nonlinear plant code to local
-state-space models with one JAX-compatible call.
+`linearize` (also available as `linearize_ss`) lets you move from nonlinear
+plant code to local state-space models with one JAX-compatible call.
 
 ```python
 import jax
@@ -75,7 +75,7 @@ import jax.numpy as jnp
 import contrax as cx
 
 
-def pendulum(x, u):
+def pendulum(t, x, u):
     theta, theta_dot = x
     torque = u[0]
     return jnp.array([theta_dot, -jnp.sin(theta) + torque])
@@ -88,7 +88,7 @@ def sensor(x, u):
 x_eq = jnp.array([0.1, 0.0])
 u_eq = jnp.array([jnp.sin(0.1)])
 
-sys_c = cx.linearize_ss(pendulum, x_eq, u_eq, output=sensor)
+sys_c = cx.linearize(pendulum, x_eq, u_eq, output=sensor)
 sys_d = cx.c2d(sys_c, dt=0.05)
 ```
 
@@ -113,7 +113,7 @@ import jax.numpy as jnp
 import contrax as cx
 
 
-def pendulum(x, u):
+def pendulum(t, x, u):
     return jnp.array([x[1], -jnp.sin(x[0]) + u[0]])
 
 
@@ -122,7 +122,7 @@ def sensor(x, u):
 
 
 def design(x_eq, u_eq):
-    sys_c = cx.linearize_ss(pendulum, x_eq, u_eq, output=sensor)
+    sys_c = cx.linearize(pendulum, x_eq, u_eq, output=sensor)
     sys_d = cx.c2d(sys_c, dt=0.05)
     return cx.lqr(sys_d, jnp.eye(2), jnp.ones((1, 1))).K
 
