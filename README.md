@@ -14,6 +14,8 @@ with `jit`, `vmap`, and `grad` behavior underneath.
 
 **[Documentation](https://givani30.github.io/Contrax/)** · [Getting started](https://givani30.github.io/Contrax/getting-started/) · [API reference](https://givani30.github.io/Contrax/api/systems/)
 
+![Differentiable LQR tuning loop](https://raw.githubusercontent.com/givani30/Contrax/main/docs/assets/images/differentiable-lqr-loop.svg)
+
 ---
 
 ## Install
