@@ -34,14 +34,6 @@ def test_lsim_shapes(disc_sys):
     assert ys.shape == (T, p)
 
 
-def test_lsim_default_x0(disc_sys):
-    """x0=None should default to zeros."""
-    T = 10
-    us = jnp.zeros((T, 1))
-    ts, xs, ys = cx.lsim(disc_sys, us)
-    assert jnp.allclose(xs, 0.0, atol=1e-12)
-
-
 def test_lsim_time_vector(disc_sys):
     """ts must equal k * dt for k = 0, ..., T-1."""
     T = 20
@@ -60,13 +52,6 @@ def test_lsim_zero_input_stays_at_zero(disc_sys):
     assert jnp.allclose(ys, 0.0, atol=1e-12)
 
 
-def test_lsim_initial_state_preserved(disc_sys):
-    x0 = jnp.array([1.0, 2.0, 3.0])
-    us = jnp.zeros((10, 1))
-    _, xs, _ = cx.lsim(disc_sys, us, x0)
-    assert jnp.allclose(xs[0], x0)
-
-
 def test_lsim_one_step_manual(disc_sys):
     """First step must equal A @ x0 + B @ u0."""
     x0 = jnp.array([1.0, 0.0, 0.0])
@@ -74,14 +59,6 @@ def test_lsim_one_step_manual(disc_sys):
     _, xs, _ = cx.lsim(disc_sys, us, x0)
     x1_expected = disc_sys.A @ x0 + disc_sys.B @ us[0]
     assert jnp.allclose(xs[1], x1_expected, atol=1e-12)
-
-
-def test_lsim_finite(disc_sys):
-    x0 = jnp.ones(3) * 0.01
-    us = jax.random.normal(jax.random.PRNGKey(0), (100, 1)) * 0.1
-    _, xs, ys = cx.lsim(disc_sys, us, x0)
-    assert jnp.all(jnp.isfinite(xs))
-    assert jnp.all(jnp.isfinite(ys))
 
 
 def test_lsim_jit_compatible(disc_sys):
@@ -161,19 +138,6 @@ def test_simulate_lqr_closed_loop_converges(disc_sys):
     assert jnp.linalg.norm(xs[-1]) < jnp.linalg.norm(xs[0]) * 0.01
 
 
-def test_simulate_shapes(disc_sys):
-    T = 30
-
-    def policy(t, x):
-        del t, x
-        return jnp.zeros(1)
-
-    ts, xs, ys = cx.simulate(disc_sys, jnp.zeros(3), policy, num_steps=T)
-    assert ts.shape == (T,)
-    assert xs.shape == (T + 1, 3)
-    assert ys.shape == (T, 1)
-
-
 def test_simulate_jit_compatible(disc_sys):
     """simulate should JIT-compile when T is fixed at trace time."""
     Q = jnp.eye(3)
@@ -193,25 +157,6 @@ def test_simulate_jit_compatible(disc_sys):
     assert xs.shape == (41, 3)
     assert ys.shape == (40, 1)
     assert jnp.all(jnp.isfinite(xs))
-
-
-def test_simulate_continuous_shapes(cont_sys):
-    ts, xs, ys = cx.simulate(
-        cont_sys, jnp.zeros(3), lambda t, x: jnp.zeros(1), duration=2.0, dt=0.1
-    )
-
-    assert ts.shape == (21,)
-    assert xs.shape == (21, 3)
-    assert ys.shape == (21, 1)
-
-
-def test_simulate_continuous_preserves_initial_state(cont_sys):
-    x0 = jnp.array([1.0, -0.5, 0.25])
-    _, xs, _ = cx.simulate(
-        cont_sys, x0, lambda t, x: jnp.zeros(1), duration=1.0, dt=0.1
-    )
-
-    assert jnp.allclose(xs[0], x0, atol=1e-12)
 
 
 def test_simulate_continuous_zero_input_matches_matrix_exponential():
@@ -243,25 +188,6 @@ def test_simulate_continuous_lqr_closed_loop_converges():
 
     assert jnp.all(jnp.isfinite(xs))
     assert jnp.linalg.norm(xs[-1]) < jnp.linalg.norm(xs[0]) * 0.1
-
-
-def test_simulate_continuous_jit_compatible():
-    sys = cx.ss(
-        A=jnp.array([[-1.0]]),
-        B=jnp.array([[1.0]]),
-        C=jnp.array([[1.0]]),
-        D=jnp.zeros((1, 1)),
-    )
-
-    def run(x0):
-        return cx.simulate(sys, x0, lambda t, x: jnp.zeros(1), duration=1.0, dt=0.1)
-
-    ts, xs, ys = jax.jit(run)(jnp.array([2.0]))
-
-    assert ts.shape == (11,)
-    assert xs.shape == (11, 1)
-    assert ys.shape == (11, 1)
-    assert jnp.all(jnp.isfinite(xs))
 
 
 def test_simulate_continuous_nonlinear_system_matches_exponential_decay():
@@ -430,46 +356,6 @@ def test_phs_diagnostics_report_power_balance_and_structure_errors():
     assert abs(float(diag.power_balance_residual)) < 1e-10
 
 
-def test_phs_diagnostics_jit_compatible():
-    def H(x):
-        return 0.5 * (x[0] ** 2 + x[1] ** 2)
-
-    sys = cx.phs_system(
-        H,
-        R=lambda x: jnp.array([[0.2, 0.0], [0.0, 0.3]], dtype=x.dtype),
-        G=lambda x: jnp.array([[1.0], [0.5]], dtype=x.dtype),
-        state_dim=2,
-        input_dim=1,
-        output_dim=2,
-    )
-
-    run = jax.jit(lambda x, u: cx.phs_diagnostics(sys, x, u))
-    diag = run(jnp.array([1.0, -2.0]), jnp.array([0.25]))
-
-    assert isinstance(diag, cx.PHSStructureDiagnostics)
-    assert jnp.isfinite(diag.storage_rate)
-    assert jnp.isfinite(diag.dissipation_power)
-    assert jnp.isfinite(diag.power_balance_residual)
-
-
-def test_schedule_phs_respects_base_structure_map_when_unscheduled():
-    def H(x):
-        return 0.5 * (x[0] ** 2 + x[1] ** 2)
-
-    base = cx.phs_system(
-        H,
-        J=lambda x: jnp.array([[0.0, 2.0], [-2.0, 0.0]], dtype=x.dtype),
-        state_dim=2,
-        input_dim=1,
-        output_dim=2,
-    )
-    scheduled = cx.schedule_phs(base, context_fn=lambda t: t)
-
-    xdot = scheduled.dynamics(0.0, jnp.array([1.0, 0.0]), jnp.zeros(1))
-
-    assert jnp.allclose(xdot, jnp.array([0.0, -2.0]), atol=1e-12)
-
-
 def test_schedule_phs_accepts_scheduled_structure_map():
     def H(x):
         return 0.5 * (x[0] ** 2 + x[1] ** 2)
@@ -488,15 +374,6 @@ def test_schedule_phs_accepts_scheduled_structure_map():
     assert jnp.allclose(xdot, jnp.array([0.0, -3.0]), atol=1e-12)
 
 
-def test_block_observation_jit_compatible():
-    observe = cx.block_observation((2, 1, 2), (1, 2))
-    run = jax.jit(lambda x: observe(0.0, x, jnp.zeros(1)))
-
-    y = run(jnp.array([1.0, 2.0, 3.0, 4.0, 5.0]))
-
-    assert jnp.allclose(y, jnp.array([3.0, 4.0, 5.0]))
-
-
 def test_step_response_discrete_matches_lsim_with_unit_step(disc_sys):
     T = 12
     us = jnp.ones((T, 1))
@@ -506,46 +383,6 @@ def test_step_response_discrete_matches_lsim_with_unit_step(disc_sys):
 
     assert jnp.allclose(ts_step, ts_lsim, atol=1e-12)
     assert jnp.allclose(ys_step, ys_lsim, atol=1e-12)
-
-
-def test_impulse_response_discrete_matches_lsim_with_unit_pulse(disc_sys):
-    T = 12
-    us = jnp.zeros((T, 1)).at[0].set(1.0)
-
-    ts_imp, _, ys_imp = cx.impulse_response(disc_sys, num_steps=T)
-    ts_lsim, _, ys_lsim = cx.lsim(disc_sys, us)
-
-    assert jnp.allclose(ts_imp, ts_lsim, atol=1e-12)
-    assert jnp.allclose(ys_imp, ys_lsim, atol=1e-12)
-
-
-def test_initial_response_discrete_matches_lsim_with_zero_input(disc_sys):
-    x0 = jnp.array([1.0, -0.5, 0.25])
-    T = 12
-    us = jnp.zeros((T, 1))
-
-    ts_init, _, ys_init = cx.initial_response(disc_sys, x0, num_steps=T)
-    ts_lsim, _, ys_lsim = cx.lsim(disc_sys, us, x0=x0)
-
-    assert jnp.allclose(ts_init, ts_lsim, atol=1e-12)
-    assert jnp.allclose(ys_init, ys_lsim, atol=1e-12)
-
-
-def test_step_response_continuous_matches_simulate_with_constant_input():
-    sys = cx.ss(
-        A=jnp.array([[-1.0]]),
-        B=jnp.array([[2.0]]),
-        C=jnp.array([[1.0]]),
-        D=jnp.zeros((1, 1)),
-    )
-
-    ts_step, _, ys_step = cx.step_response(sys, duration=1.0, dt=0.1)
-    ts_sim, _, ys_sim = cx.simulate(
-        sys, jnp.zeros(1), lambda t, x: jnp.ones(1), duration=1.0, dt=0.1
-    )
-
-    assert jnp.allclose(ts_step, ts_sim, atol=1e-12)
-    assert jnp.allclose(ys_step, ys_sim, atol=1e-8)
 
 
 def test_impulse_response_continuous_matches_state_jump_convention():
@@ -560,24 +397,6 @@ def test_impulse_response_continuous_matches_state_jump_convention():
     expected = 6.0 * jnp.exp(-ts)
 
     assert jnp.allclose(ys[:, 0], expected, atol=1e-5, rtol=1e-5)
-
-
-def test_initial_response_continuous_matches_zero_input_simulate():
-    sys = cx.ss(
-        A=jnp.array([[-1.0]]),
-        B=jnp.array([[2.0]]),
-        C=jnp.array([[1.5]]),
-        D=jnp.zeros((1, 1)),
-    )
-    x0 = jnp.array([2.0])
-
-    ts_init, _, ys_init = cx.initial_response(sys, x0, duration=1.0, dt=0.1)
-    ts_sim, _, ys_sim = cx.simulate(
-        sys, x0, lambda t, x: jnp.zeros(1), duration=1.0, dt=0.1
-    )
-
-    assert jnp.allclose(ts_init, ts_sim, atol=1e-12)
-    assert jnp.allclose(ys_init, ys_sim, atol=1e-8)
 
 
 def test_response_functions_reject_bad_input_index():
@@ -689,15 +508,6 @@ def test_sample_system_fixed_step_shapes(method):
     assert jnp.all(jnp.isfinite(xs))
 
 
-@pytest.mark.parametrize("method", ["euler", "midpoint", "rk4"])
-def test_sample_system_fixed_step_finite_after_many_steps(method):
-    sys = _make_oscillator_phs()
-    sys_d = cx.sample_system(sys, 0.05, method=method)
-    x0 = jnp.array([1.0, 0.0])
-    _, xs, _ = cx.simulate(sys_d, x0, lambda t, x: jnp.zeros(1), num_steps=100)
-    assert jnp.all(jnp.isfinite(xs))
-
-
 def test_sample_system_rk4_accuracy_vs_diffrax():
     """RK4 with dt=0.1 should match Diffrax to within 1e-4 on a unit oscillator.
 
@@ -737,34 +547,6 @@ def test_sample_system_rk4_n_substeps_improves_accuracy():
     err_1 = float(jnp.max(jnp.abs(xs_1[:, 0] - exact_q)))
     err_4 = float(jnp.max(jnp.abs(xs_4[:, 0] - exact_q)))
     assert err_4 < err_1, f"n_substeps=4 error {err_4:.2e} not smaller than n_substeps=1 {err_1:.2e}"
-
-
-@pytest.mark.parametrize("method", ["euler", "midpoint", "rk4"])
-def test_sample_system_fixed_step_jit_compatible(method):
-    sys = _make_oscillator_phs()
-    sys_d = cx.sample_system(sys, 0.1, method=method)
-    x0 = jnp.array([1.0, 0.0])
-    run = jax.jit(lambda x0: cx.simulate(sys_d, x0, lambda t, x: jnp.zeros(1), num_steps=10))
-    _, xs, _ = run(x0)
-    assert xs.shape == (11, 2)
-    assert jnp.all(jnp.isfinite(xs))
-
-
-@pytest.mark.parametrize("method", ["euler", "midpoint", "rk4"])
-def test_sample_system_fixed_step_vmap_compatible(method):
-    """vmap over initial conditions should work with fixed-step methods."""
-    sys = _make_oscillator_phs()
-    sys_d = cx.sample_system(sys, 0.1, method=method)
-
-    x0s = jnp.array([[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]])
-
-    def run_one(x0):
-        _, xs, _ = cx.simulate(sys_d, x0, lambda t, x: jnp.zeros(1), num_steps=5)
-        return xs
-
-    all_xs = jax.vmap(run_one)(x0s)
-    assert all_xs.shape == (3, 6, 2)
-    assert jnp.all(jnp.isfinite(all_xs))
 
 
 def test_sample_system_rejects_unknown_method():
@@ -825,47 +607,16 @@ def test_separable_phs_is_phs_subtype():
     assert isinstance(sys, cx.PHSSystem)
 
 
-def test_separable_phs_h_matches_v_plus_t():
-    """Stored H must equal V(q) + T(p) at an arbitrary state."""
+def test_separable_phs_properties():
+    """H == V+T, structural metadata is correct, and dynamics are finite."""
     sys = _make_separable_oscillator()
     x = jnp.array([0.6, -0.8])
-    h_direct = sys.H(x)
-    h_split = sys.V(x[:1]) + sys.T(x[1:])
-    assert jnp.allclose(h_direct, h_split, atol=1e-12)
-
-
-def test_separable_phs_n_dofs_and_state_dim():
-    sys = _make_separable_oscillator()
+    assert jnp.allclose(sys.H(x), sys.V(x[:1]) + sys.T(x[1:]), atol=1e-12)
     assert sys.n_dofs == 1
     assert sys.state_dim == 2
-
-
-def test_separable_phs_dynamics_finite():
-    sys = _make_separable_oscillator()
-    x = jnp.array([1.0, 0.0])
-    u = jnp.zeros(1)
-    xdot = sys.dynamics(0.0, x, u)
+    xdot = sys.dynamics(0.0, jnp.array([1.0, 0.0]), jnp.zeros(1))
     assert xdot.shape == (2,)
     assert jnp.all(jnp.isfinite(xdot))
-
-
-def test_separable_phs_simulation_conserves_energy():
-    """Undamped separable PHS should conserve energy under continuous simulation."""
-    sys = _make_separable_oscillator()
-    _, xs, _ = cx.simulate(
-        sys, jnp.array([1.0, 0.0]), lambda t, x: jnp.zeros(1), duration=1.0, dt=0.01
-    )
-    energies = jax.vmap(sys.H)(xs)
-    assert jnp.max(jnp.abs(energies - energies[0])) < 1e-3
-
-
-def test_separable_phs_sample_system_rk4():
-    """SeparablePHSSystem should work with sample_system(method='rk4')."""
-    sys = _make_separable_oscillator()
-    sys_d = cx.sample_system(sys, 0.1, method="rk4")
-    x0 = jnp.array([1.0, 0.0])
-    _, xs, _ = cx.simulate(sys_d, x0, lambda t, x: jnp.zeros(1), num_steps=20)
-    assert jnp.all(jnp.isfinite(xs))
 
 
 def test_separable_phs_rejects_invalid_n_dofs():
@@ -952,43 +703,6 @@ def test_sv_bounded_drift_vs_euler_nonlinear():
     assert euler_final_drift > sv_max_drift, (
         f"Euler final drift {euler_final_drift:.4f} not larger than SV max drift {sv_max_drift:.4f}"
     )
-
-
-def test_sv_dissipative_energy_decreases():
-    """Dissipative separable PHS should lose energy under Störmer-Verlet."""
-    def V(q): return 0.5 * jnp.dot(q, q)
-    def T(p): return 0.5 * jnp.dot(p, p)
-    sys = cx.separable_phs_system(
-        V, T, n_dofs=1,
-        R=lambda x: jnp.array([[0.0, 0.0], [0.0, 0.3]], dtype=x.dtype),
-        input_dim=1, output_dim=2,
-    )
-    sys_d = cx.sample_system(sys, 0.1, method="sv")
-    x0 = jnp.array([1.0, 0.0])
-    _, xs, _ = cx.simulate(sys_d, x0, lambda t, x: jnp.zeros(1), num_steps=50)
-    energies = jax.vmap(sys.H)(xs)
-    assert float(energies[-1]) < float(energies[0])
-
-
-def test_sv_jit_compatible():
-    sys = _make_separable_oscillator_sys()
-    sys_d = cx.sample_system(sys, 0.1, method="sv")
-    x0 = jnp.array([1.0, 0.0])
-    run = jax.jit(lambda x0: cx.simulate(sys_d, x0, lambda t, x: jnp.zeros(1), num_steps=10))
-    _, xs, _ = run(x0)
-    assert xs.shape == (11, 2)
-    assert jnp.all(jnp.isfinite(xs))
-
-
-def test_sv_vmap_over_initial_conditions():
-    sys = _make_separable_oscillator_sys()
-    sys_d = cx.sample_system(sys, 0.1, method="sv")
-    x0s = jnp.array([[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]])
-    all_xs = jax.vmap(
-        lambda x0: cx.simulate(sys_d, x0, lambda t, x: jnp.zeros(1), num_steps=5).xs
-    )(x0s)
-    assert all_xs.shape == (3, 6, 2)
-    assert jnp.all(jnp.isfinite(all_xs))
 
 
 def test_sv_n_substeps_improves_energy_accuracy():

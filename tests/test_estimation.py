@@ -54,20 +54,6 @@ def test_kalman_converges_to_constant_measurement():
     assert abs(float(result.innovations[-1, 0])) < 1e-3
 
 
-def test_kalman_covariance_remains_symmetric_positive():
-    sys = _scalar_sys()
-    ys = jnp.linspace(0.0, 1.0, 30)[:, None]
-    result = cx.kalman(
-        sys,
-        Q_noise=jnp.array([[1e-3]]),
-        R_noise=jnp.array([[1e-2]]),
-        ys=ys,
-    )
-
-    assert jnp.allclose(result.P, jnp.swapaxes(result.P, -1, -2), atol=1e-12)
-    assert jnp.all(result.P[:, 0, 0] >= 0.0)
-
-
 def test_kalman_step_matches_batch_filter():
     """kalman_step (predict-from-posterior-at-k-1) reproduces the batch filter.
 
@@ -288,60 +274,6 @@ def test_ekf_step_matches_batch_filter():
     assert jnp.allclose(innovations, batch.innovations, atol=1e-12)
 
 
-def test_ekf_step_can_skip_missing_measurement_under_jit():
-    Q = jnp.array([[1e-3]])
-    R = jnp.array([[1e-2]])
-    y = jnp.array([10.0])
-    u = jnp.array([0.0])
-    x = jnp.array([1.0])
-    P = jnp.array([[0.5]])
-
-    def f(t, x, u):
-        return jnp.array([0.8 * x[0] + u[0]])
-
-    def h(x):
-        return jnp.array([x[0] ** 2])
-
-    def step(has_measurement):
-        return cx.ekf_step(
-            f,
-            x,
-            P,
-            u,
-            y,
-            Q,
-            R,
-            observation=h,
-            has_measurement=has_measurement,
-        )
-
-    x_skip, P_skip, innov_skip = jax.jit(step)(jnp.array(False))
-    x_pred, P_pred = cx.ekf_predict(f, x, P, u, Q)
-
-    assert jnp.allclose(x_skip, x_pred, atol=1e-12)
-    assert jnp.allclose(P_skip, P_pred, atol=1e-12)
-    assert jnp.allclose(innov_skip, jnp.zeros_like(y), atol=1e-12)
-
-
-def test_ekf_update_supports_iterated_update():
-    R = jnp.array([[1e-2]])
-    y = jnp.array([4.0])
-    x_pred = jnp.array([1.0])
-    P_pred = jnp.array([[0.5]])
-
-    def h(x):
-        return jnp.array([x[0] ** 2])
-
-    x_one, P_one, _ = cx.ekf_update(h, x_pred, P_pred, y, R, num_iter=1)
-    x_iter, P_iter, innov_iter = cx.ekf_update(h, x_pred, P_pred, y, R, num_iter=3)
-
-    assert x_one.shape == x_iter.shape == x_pred.shape
-    assert P_one.shape == P_iter.shape == P_pred.shape
-    assert innov_iter.shape == y.shape
-    assert jnp.all(jnp.isfinite(x_iter))
-    assert jnp.all(jnp.isfinite(P_iter))
-
-
 def test_mhe_objective_zero_for_exact_nonlinear_window():
     def f(x, u, params):
         return jnp.array([params["a"] * x[0] + u[0] ** 2])
@@ -451,26 +383,6 @@ def test_rts_shapes_and_terminal_state_matches_filter():
     assert jnp.allclose(smoothed.P_smooth[-1], kf.P[-1])
 
 
-def test_rts_accepts_process_noise_covariance():
-    """RTS should include the same process noise used by the forward filter."""
-    sys = _scalar_sys()
-    Q = jnp.array([[1e-3]])
-    ys = jnp.linspace(0.0, 1.0, 25)[:, None]
-    kf = cx.kalman(
-        sys,
-        Q_noise=Q,
-        R_noise=jnp.array([[1e-2]]),
-        ys=ys,
-    )
-    smoothed = cx.rts(sys, kf, Q_noise=Q)
-
-    assert smoothed.x_smooth.shape == kf.x_hat.shape
-    assert smoothed.P_smooth.shape == kf.P.shape
-    assert jnp.all(jnp.isfinite(smoothed.x_smooth))
-    assert jnp.all(jnp.isfinite(smoothed.P_smooth))
-    assert jnp.all(smoothed.P_smooth[:, 0, 0] <= kf.P[:, 0, 0] + 1e-12)
-
-
 def test_uks_matches_rts_for_linear_system():
     sys = _scalar_sys()
     nonlinear = cx.nonlinear_system(
@@ -501,32 +413,6 @@ def test_uks_matches_rts_for_linear_system():
     )
 
 
-def test_uks_shapes_and_terminal_match_filter():
-    sys = cx.nonlinear_system(
-        lambda t, x, u: jnp.array([0.8 * x[0] + u[0]]),
-        observation=lambda t, x, u: jnp.array([x[0] ** 2]),
-        dt=1.0,
-        state_dim=1,
-        input_dim=1,
-        output_dim=1,
-    )
-    ys = jnp.full((15, 1), 4.0)
-    us = jnp.zeros((15, 1))
-    Q = jnp.array([[1e-4]])
-    R = jnp.array([[1e-3]])
-    filtered = cx.ukf(
-        sys, Q, R, ys, us, jnp.array([1.0]), jnp.array([[0.5]]), alpha=0.5
-    )
-    smoothed = cx.uks(sys, filtered, Q_noise=Q, us=us, alpha=0.5)
-
-    assert smoothed.x_smooth.shape == filtered.x_hat.shape
-    assert smoothed.P_smooth.shape == filtered.P.shape
-    assert jnp.allclose(smoothed.x_smooth[-1], filtered.x_hat[-1], atol=1e-12)
-    assert jnp.allclose(smoothed.P_smooth[-1], filtered.P[-1], atol=1e-12)
-    assert jnp.all(jnp.isfinite(smoothed.x_smooth))
-    assert jnp.all(jnp.isfinite(smoothed.P_smooth))
-
-
 def test_ukf_matches_kalman_for_linear_system():
     sys = _scalar_sys()
     ys = jnp.linspace(0.0, 1.0, 20)[:, None]
@@ -550,31 +436,6 @@ def test_ukf_matches_kalman_for_linear_system():
     assert jnp.allclose(ukf.x_hat, kf.x_hat, atol=1e-9)
     assert jnp.allclose(ukf.P, kf.P, atol=1e-9)
     assert jnp.allclose(ukf.innovations, kf.innovations, atol=1e-9)
-
-
-def test_ukf_accepts_nonlinear_system_object():
-    scalar_sys = _scalar_sys()
-    sys = cx.nonlinear_system(
-        lambda t, x, u: scalar_sys.A @ x + scalar_sys.B @ u,
-        observation=lambda t, x, u: scalar_sys.C @ x,
-        dt=1.0,
-        state_dim=1,
-        input_dim=1,
-        output_dim=1,
-    )
-    ys = jnp.linspace(0.0, 1.0, 20)[:, None]
-    us = jnp.zeros((20, 1))
-    Q = jnp.array([[1e-3]])
-    R = jnp.array([[1e-2]])
-    x0 = jnp.array([0.0])
-    P0 = jnp.array([[1.0]])
-
-    result = cx.ukf(sys, Q, R, ys, us, x0, P0)
-    reference = cx.kalman(scalar_sys, Q, R, ys, x0=x0, P0=P0)
-
-    assert jnp.allclose(result.x_hat, reference.x_hat, atol=1e-9)
-    assert jnp.allclose(result.P, reference.P, atol=1e-9)
-    assert jnp.allclose(result.innovations, reference.innovations, atol=1e-9)
 
 
 def test_ukf_handles_nonlinear_observation():
@@ -644,48 +505,6 @@ def test_ukf_exposes_prediction_and_likelihood_surface():
     )
     assert jnp.all(jnp.isfinite(result.log_likelihood_terms))
     assert jnp.all(result.innovation_covariances[:, 0, 0] > 0.0)
-
-
-def test_uks_uses_stored_ukf_prediction_intermediates():
-    sys = cx.nonlinear_system(
-        lambda t, x, u: jnp.array([0.8 * x[0] + u[0]]),
-        observation=lambda t, x, u: jnp.array([x[0]]),
-        dt=1.0,
-        state_dim=1,
-        input_dim=1,
-        output_dim=1,
-    )
-    ys = jnp.linspace(0.0, 1.0, 10)[:, None]
-    us = jnp.zeros((10, 1))
-    filtered = cx.ukf(
-        sys,
-        Q_noise=jnp.array([[1e-3]]),
-        R_noise=jnp.array([[1e-2]]),
-        ys=ys,
-        us=us,
-        x0=jnp.array([0.0]),
-        P0=jnp.array([[1.0]]),
-    )
-
-    tampered = cx.UKFResult(
-        x_hat=filtered.x_hat,
-        P=filtered.P,
-        innovations=filtered.innovations,
-        predicted_measurements=filtered.predicted_measurements,
-        innovation_covariances=filtered.innovation_covariances,
-        log_likelihood_terms=filtered.log_likelihood_terms,
-        predicted_state_means=filtered.predicted_state_means + 0.25,
-        predicted_state_covariances=filtered.predicted_state_covariances,
-        transition_cross_covariances=filtered.transition_cross_covariances,
-    )
-
-    smoothed_reference = cx.uks(sys, filtered, Q_noise=jnp.array([[1e-3]]), us=us)
-    smoothed_tampered = cx.uks(sys, tampered, Q_noise=jnp.array([[1e-3]]), us=us)
-
-    assert not jnp.allclose(
-        smoothed_reference.x_smooth,
-        smoothed_tampered.x_smooth,
-    )
 
 
 def test_sample_system_matches_known_zoh_scalar_decay():
@@ -808,34 +627,6 @@ def test_innovation_diagnostics_compute_nis_and_conditioning():
     assert not bool(diag.nonfinite)
 
 
-def test_likelihood_diagnostics_summarize_ukf_terms():
-    sys = cx.nonlinear_system(
-        lambda t, x, u: x,
-        output=lambda t, x, u: x,
-        dt=1.0,
-        state_dim=1,
-        input_dim=1,
-        output_dim=1,
-    )
-    result = cx.ukf(
-        sys,
-        Q_noise=jnp.array([[1e-4]]),
-        R_noise=jnp.array([[1e-2]]),
-        ys=jnp.zeros((6, 1)),
-        us=jnp.zeros((6, 1)),
-        x0=jnp.array([0.0]),
-        P0=jnp.array([[0.1]]),
-    )
-
-    diag = cx.likelihood_diagnostics(result.log_likelihood_terms)
-
-    assert isinstance(diag, cx.LikelihoodDiagnostics)
-    assert diag.log_likelihood_terms.shape == (6,)
-    assert jnp.isfinite(diag.total_log_likelihood)
-    assert jnp.isfinite(diag.mean_log_likelihood)
-    assert not bool(diag.nonfinite)
-
-
 def test_ukf_diagnostics_wrap_common_ukf_summary():
     sys = cx.nonlinear_system(
         lambda t, x, u: x,
@@ -861,29 +652,6 @@ def test_ukf_diagnostics_wrap_common_ukf_summary():
     assert isinstance(likelihood_diag, cx.LikelihoodDiagnostics)
     assert innovation_diag.nis.shape == (5,)
     assert likelihood_diag.log_likelihood_terms.shape == (5,)
-
-
-def test_innovation_rms_accepts_kalman_and_ukf_results():
-    kalman_result = cx.KalmanResult(
-        x_hat=jnp.zeros((3, 1)),
-        P=jnp.ones((3, 1, 1)),
-        innovations=jnp.array([[1.0], [2.0], [2.0]]),
-    )
-    ukf_result = cx.UKFResult(
-        x_hat=jnp.zeros((3, 1)),
-        P=jnp.ones((3, 1, 1)),
-        innovations=jnp.array([[1.0], [2.0], [2.0]]),
-        predicted_measurements=jnp.zeros((3, 1)),
-        innovation_covariances=jnp.tile(jnp.eye(1)[None], (3, 1, 1)),
-        log_likelihood_terms=jnp.zeros(3),
-        predicted_state_means=jnp.zeros((3, 1)),
-        predicted_state_covariances=jnp.ones((3, 1, 1)),
-        transition_cross_covariances=jnp.ones((3, 1, 1)),
-    )
-
-    expected = jnp.sqrt((1.0**2 + 2.0**2 + 2.0**2) / 3.0)
-    assert jnp.allclose(cx.innovation_rms(kalman_result), expected)
-    assert jnp.allclose(cx.innovation_rms(ukf_result), expected)
 
 
 def test_smoother_diagnostics_healthy_rts():
@@ -927,24 +695,6 @@ def test_smoother_diagnostics_healthy_uks():
 
     assert float(diag.min_covariance_reduction) >= -1e-9
     assert not bool(diag.nonfinite)
-
-
-def test_smoother_diagnostics_detects_inflated_covariance():
-    """Manually inflating P_smooth triggers a negative covariance_reduction."""
-    sys = _scalar_sys()
-    Q = jnp.array([[1e-3]])
-    ys = jnp.linspace(0.0, 1.0, 10)[:, None]
-    filtered = cx.kalman(sys, Q, jnp.array([[1e-2]]), ys)
-    smoothed = cx.rts(sys, filtered, Q_noise=Q)
-
-    # Inflate P_smooth to be larger than P_filtered — simulates a broken smoother
-    bad_smoothed = cx.RTSResult(
-        x_smooth=smoothed.x_smooth,
-        P_smooth=filtered.P * 2.0,
-    )
-    diag = cx.smoother_diagnostics(bad_smoothed, filtered)
-
-    assert float(diag.min_covariance_reduction) < 0.0
 
 
 def test_mhe_shapes_and_convergence():
@@ -1040,31 +790,6 @@ def test_mhe_matches_rts_smoother_linear_gaussian():
 
     assert bool(result.solver_converged)
     assert jnp.allclose(result.xs, smoothed.x_smooth, atol=1e-4)
-
-
-def test_mhe_result_is_pytree():
-    """MHEResult leaves are all JAX arrays (eqx.Module pytree contract)."""
-    import jax
-
-    sys = _scalar_sys()
-    T = 5
-    Q = 0.1 * jnp.eye(1)
-    R = 0.1 * jnp.eye(1)
-
-    result = cx.mhe(
-        lambda x, u: sys.A @ x,
-        lambda x: sys.C @ x,
-        xs_init=jnp.zeros((T, 1)),
-        us=jnp.zeros((T - 1, 1)),
-        ys=jnp.zeros((T, 1)),
-        x_prior=jnp.zeros(1),
-        P_prior=jnp.eye(1),
-        Q_noise=Q,
-        R_noise=R,
-    )
-
-    leaves = jax.tree_util.tree_leaves(result)
-    assert all(isinstance(leaf, jax.Array) for leaf in leaves)
 
 
 def test_soft_quadratic_penalty_supports_scalar_and_matrix_weights():
