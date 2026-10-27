@@ -1,4 +1,4 @@
-"""contrax._ukf — Unscented Kalman filter."""
+"""Unscented Kalman filtering and smoothing."""
 
 import jax
 import jax.numpy as jnp
@@ -85,16 +85,14 @@ def ukf(
     solver: UKF | None = None,
     throw: bool = False,
 ) -> UKFResult:
-    """Run an unscented Kalman filter for nonlinear dynamics and observations.
+    """Run a discrete-time unscented Kalman filter for nonlinear dynamics and observations.
 
-    Uses a deterministic sigma-point transform instead of local Jacobians to
-    propagate means and covariances through the nonlinear transition and
-    observation models.
+    Propagates means and covariances through nonlinear transition and
+    observation models with a deterministic sigma-point transform.
 
-    Assumes additive process and measurement noise and positive-definite
-    sigma-point/innovation covariances. No jitter or covariance repair is added.
-    Supports jit, vmap, JVP and VJP through JAX model callbacks. A single
-    innovation Cholesky factor serves both the gain and Gaussian likelihood.
+    Assumes additive process and measurement noise. Sigma-point and innovation
+    covariances must be positive definite. One innovation Cholesky factor is
+    used for both the gain and Gaussian likelihood.
 
     Args:
         model_or_f: Nonlinear system model or dynamics function.
@@ -111,7 +109,7 @@ def ukf(
         has_measurement: Whole-observation flags, shape `(T,)`. Missing samples
             may contain NaNs; their innovation, predicted measurement,
             innovation covariance and log-likelihood term are zero placeholders.
-        solver: Sigma-point settings, default contrax.solvers.UKF().
+        solver: Sigma-point configuration; defaults to `UKF()`.
 
         throw: Raise on numerical failure; otherwise inspect status.
 
@@ -286,9 +284,8 @@ def uks(
 ) -> RTSResult:
     """Run an unscented Rauch-Tung-Striebel-style smoother.
 
-    Uses the predicted means, covariances and transition cross-covariances
-    retained by ukf. No model evaluation or repeated sigma-point transform is
-    needed. Supports jit, vmap, JVP and VJP. Empty passes return empty results.
+    Uses the predicted means, covariances, and transition cross-covariances in
+    `UKFResult`. Empty passes return empty results.
     """
     x_hats = result.xs
     Ps = result.Ps

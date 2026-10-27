@@ -22,9 +22,8 @@ def rts(
     Applies the standard backward smoothing pass to the output of `kalman()`
     using the same process model and process noise covariance.
 
-    This is an offline smoothing primitive rather than an online filter.
-    `Q` should match the covariance used in the forward `kalman()` pass;
-    for deterministic dynamics, pass zeros rather than omitting the term.
+    Smooths a completed `kalman()` pass using the same process model and noise
+    covariance. For deterministic dynamics, set `Q` to zero.
 
     Args:
         sys: Discrete-time linear system used in the forward filter.

@@ -15,10 +15,9 @@ def rollout(
 ) -> Any:
     """Roll out arbitrary discrete-time dynamics over a fixed input sequence.
 
-    This is the generic nonlinear trajectory primitive in Contrax. Unlike
-    `lsim()` and `simulate()`, it does not require an LTI system object and does
-    not compute outputs. It simply applies a transition function with
-    `jax.lax.scan`.
+    Applies `f` to each input with `jax.lax.scan` and returns the states from
+    `x0` through the final transition. Define output calculations separately
+    when they are needed.
 
     Args:
         f: Transition function. If `params` is omitted, `f(x, u)` is called.

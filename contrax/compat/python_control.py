@@ -1,11 +1,10 @@
-"""contrax.compat.python_control — bidirectional LTI conversion with python-control.
+"""Bidirectional LTI conversion with python-control.
 
-This module is optional. It is only importable when the ``control`` package is
-installed. Import it explicitly:
+Import this optional module when the ``control`` package is installed:
 
     from contrax.compat.python_control import from_python_control, to_python_control
 
-Importing ``contrax`` does not import this module.
+The root package loads this bridge only on explicit import.
 """
 
 from __future__ import annotations
@@ -42,10 +41,10 @@ def from_python_control(
     *,
     dt: float | None = None,
 ) -> ContLTI | DiscLTI:
-    """Convert a python-control StateSpace system to a Contrax LTI system.
+    """Convert a python-control StateSpace system to an LTI system.
 
-    Only state-space (A, B, C, D) conversion is supported. Transfer functions
-    and other python-control model types must be converted to StateSpace first.
+    Converts state-space matrices `(A, B, C, D)`. Convert transfer functions
+    and other model types to `StateSpace` before calling.
 
     Args:
         sys: python-control ``StateSpace`` instance.
@@ -54,7 +53,7 @@ def from_python_control(
             systems.
 
     Returns:
-        ContLTI | DiscLTI: Equivalent Contrax system.
+        ContLTI | DiscLTI: Equivalent continuous- or discrete-time system.
 
     Raises:
         TypeError: If ``sys`` is not a ``control.StateSpace``.
@@ -103,10 +102,10 @@ def from_python_control(
 
 
 def to_python_control(sys: ContLTI | DiscLTI) -> "control.StateSpace":
-    """Convert a Contrax LTI system to a python-control StateSpace object.
+    """Convert an LTI system to a python-control StateSpace object.
 
     Args:
-        sys: Contrax continuous or discrete LTI system.
+        sys: Continuous or discrete LTI system.
 
     Returns:
         control.StateSpace: Equivalent python-control system.

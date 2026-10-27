@@ -19,9 +19,8 @@ def kalman_gain(
 ) -> KalmanGainResult:
     """Design a steady-state Kalman filter gain for a discrete LTI system.
 
-    This is the estimator dual of discrete LQR. It solves the DARE for
-    `(A.T, C.T, Q, R)` and returns the measurement-update gain used
-    by `kalman_update()`.
+    Solves the estimator-dual DARE for `(A.T, C.T, Q, R)` and returns the
+    measurement-update gain for `kalman_update()`.
 
     Args:
         sys: Discrete-time linear system.

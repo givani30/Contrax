@@ -33,15 +33,12 @@ def step_response(
 ) -> SimResult:
     """Compute the unit-step response of an LTI system.
 
-    This is the standard control sanity-check response: apply a unit step on
-    one input channel and return the output trajectory.
+    Applies a unit step to one input channel and returns the output trajectory.
 
     For MIMO systems, select one input channel at a time via `input_index`.
 
-    As an analysis helper, this is usually fine to differentiate with respect
-    to system parameters when the step timing is fixed. It is not the right
-    path for differentiating with respect to the discontinuity itself, such as
-    a switching time or other hard event location.
+    Gradients can flow through system parameters when step timing is fixed.
+    The switching time is not a differentiable input to this response.
 
     Args:
         sys: Continuous or discrete-time system.
@@ -58,8 +55,7 @@ def step_response(
         throw: Raise on numerical failure.
 
     Returns:
-        SimResult: Simulation result with `.ts`, `.xs`, `.ys`. Supports tuple
-        unpacking as ``ts, xs, ys = cx.step_response(...)``.
+        SimResult: Simulation result with output times, states, and outputs.
     """
     from contrax.sim import simulate
 
@@ -104,10 +100,8 @@ def impulse_response(
     then simulates with zero input. That means the returned sampled trajectory
     omits any singular direct-feedthrough `D delta(t)` spike at `t=0`.
 
-    This is an analysis helper rather than a smooth-input differentiation path.
-    In particular, the continuous-time version uses the standard state-jump
-    convention instead of representing a Dirac delta as an ordinary control
-    signal.
+    The continuous-time convention represents the impulse as a state jump;
+    sampled outputs omit the singular direct-feedthrough term at `t=0`.
 
     Args:
         sys: Continuous or discrete-time system.
@@ -124,8 +118,7 @@ def impulse_response(
         throw: Raise on numerical failure.
 
     Returns:
-        SimResult: Simulation result with `.ts`, `.xs`, `.ys`. Supports tuple
-        unpacking as ``ts, xs, ys = cx.impulse_response(...)``.
+        SimResult: Simulation result with output times, states, and outputs.
     """
     from contrax.sim import lsim, simulate
 
@@ -199,8 +192,6 @@ def initial_response(
 ) -> SimResult:
     """Compute the zero-input response from a nonzero initial state.
 
-    This is the third standard inspection response alongside step and impulse.
-
     Args:
         sys: Continuous or discrete-time system.
         x0: Initial state. Shape: `(n,)`.
@@ -215,8 +206,7 @@ def initial_response(
         throw: Raise on numerical failure.
 
     Returns:
-        SimResult: Simulation result with `.ts`, `.xs`, `.ys`. Supports tuple
-        unpacking as ``ts, xs, ys = cx.initial_response(...)``.
+        SimResult: Simulation result with output times, states, and outputs.
     """
     from contrax.sim import simulate
 

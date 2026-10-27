@@ -66,7 +66,6 @@ def kalman_predict(
 
     Returns:
         FilterPredictionResult: Mean x, covariance P, status and successful.
-        Unpacks as (x_pred, P_pred).
     """
     x, P, Q = prepare_state(x, P, Q)
     u = _zero_input(sys, x) if u is None else u
@@ -90,8 +89,8 @@ def kalman_update(
 ) -> FilterUpdateResult:
     """Update one linear Kalman filter step.
 
-    `has_measurement=False` returns the predicted state and covariance without
-    applying a measurement update. The flag may be a JAX scalar boolean, making
+    When `has_measurement=False`, returns the predicted state and covariance
+    with a zero innovation. The flag may be a JAX scalar boolean, making
     this helper usable inside `jax.lax.scan` for streams with missing samples.
 
     Args:
@@ -177,9 +176,8 @@ def kalman_step(
 ) -> FilterUpdateResult:
     """Run one predict-update step of a linear Kalman filter.
 
-    This is the online counterpart to `kalman()`. It is a pure array function,
-    so service loops can call it directly and batch workflows can place it
-    inside `jax.lax.scan`.
+    The step can be called directly from a service loop or placed inside
+    `jax.lax.scan` for a batch workflow.
 
     Args:
         sys: Discrete-time linear system.
@@ -199,7 +197,6 @@ def kalman_step(
 
     Returns:
         FilterUpdateResult: Mean x, covariance P, innovation, status and successful.
-        Unpacks as (x, P, innovation).
     """
     prediction = kalman_predict(sys, x, P, Q=Q, u=u)
     x_pred, P_pred = prediction
@@ -240,9 +237,9 @@ def kalman(
     predict-update recursion expressed as a pure `lax.scan`.
 
     Innovation gains use Cholesky solves and posterior covariances use Joseph
-    form by default. Innovation covariances must be positive definite. Supports
-    `jit`, `vmap`, JVP and VJP, including differentiable covariance tuning.
-    Inputs are promoted to a common floating dtype, including cached design data.
+    form by default. Innovation covariances must be positive definite. Gradients
+    flow through the filter recursion, including covariance tuning. Inputs are
+    promoted to a common floating dtype, including cached design data.
 
     Args:
         sys: Discrete-time linear system.

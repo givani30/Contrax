@@ -1,4 +1,4 @@
-"""contrax.estimation — Kalman, EKF, UKF, MHE, and RTS helpers."""
+"""Kalman filtering, smoothing, and moving-horizon estimation."""
 
 from contrax._ekf import (  # noqa: F401
     ekf,

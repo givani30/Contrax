@@ -1,4 +1,4 @@
-"""contrax._estimation_diagnostics — estimation diagnostics and health checks."""
+"""Estimation diagnostics and health checks."""
 
 import jax
 import jax.numpy as jnp
@@ -43,11 +43,10 @@ def innovation_diagnostics(
 
     The returned NIS values are the per-step normalized innovation squared
     terms `v_k^T S_k^{-1} v_k`. They are useful for routine filter health
-    inspection, but Contrax does not present them as a formal standalone
-    consistency certificate. Optional whole-observation flags exclude missing
-    entries from summaries and covariance solves. Missing per-step values are
-    zero placeholders. With no observations, summaries are NaN and nonfinite
-    remains false: absence of data is not a numerical failure.
+    inspection; interpret them alongside the model and noise assumptions.
+    Optional whole-observation flags exclude missing entries from summaries and
+    covariance solves. Missing per-step values are zero placeholders. With no
+    observations, summaries are NaN and `nonfinite` remains false.
     """
     flags = _observations(innovations, has_measurement)
     innovations = jnp.where(flags[:, None], innovations, 0)
@@ -142,11 +141,10 @@ def smoother_diagnostics(
 ) -> SmootherDiagnostics:
     """Compute health diagnostics for an RTS or UKS smoother result.
 
-    A numerically healthy smoother satisfies ``P_smooth ≤ P_filtered`` in the
-    PSD sense at every step. This function checks that guarantee and surfaces
-    the worst-case violation so callers can detect breakdown before trusting
-    smoothed trajectories. Empty passes return empty per-step arrays and NaN
-    extrema; absence of samples does not set nonfinite.
+    Checks the covariance relation ``P_smooth ≤ P_filtered`` in the positive
+    semidefinite sense and reports its worst violation. Empty inputs return
+    empty per-step arrays and NaN extrema; `nonfinite` reflects invalid values
+    in the supplied samples.
 
     Args:
         smoothed: Output of `rts()` or `uks()`.

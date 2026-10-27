@@ -95,7 +95,7 @@ class SampleResult(eqx.Module):
 
     Attributes:
         x: Terminal state. Shape: `(n,)`.
-        status: Integer `contrax.solvers.SolverStatus` code.
+        status: Integer `SolverStatus` code.
         num_steps: Integration steps, or one for an ordinary discrete model.
         successful: Whether the transition finished with finite output.
     """
@@ -120,7 +120,7 @@ class PlaceResult(eqx.Module):
         assignment_error: Smallest maximum matching distance to requested poles.
         controllability_condition: Condition estimate of the controllability matrix.
         eigenvector_condition: Condition estimate of the achieved eigenvector basis.
-        num_steps: Robust update sweeps performed; zero for direct/fallback solves.
+        num_steps: Update sweeps performed; zero for direct or fallback solves.
         relative_improvement: Last relative determinant-improvement measure.
         used_fallback: Whether K came from the bounded Ackermann fallback.
         method: Selected KNV0, YT or ackermann method, as static metadata.
@@ -244,12 +244,12 @@ class MHEResult(eqx.Module):
     Attributes:
         xs: Estimated state trajectory over the window. Shape: `(N, n)`.
         final_state: Terminal state estimate, equal to `xs[-1]`. Shape: `(n,)`.
-            This is the estimate passed to downstream controllers or observers.
+            Used as the estimate passed to downstream controllers or observers.
         final_cost: Final MHE objective value. Shape: scalar.
         solver_converged: Whether the underlying optimizer reported convergence.
             Shape: scalar bool. False means convergence was not established;
             inspect status, cost reduction and gradient_norm before use.
-        status: Integer `contrax.solvers.SolverStatus` code.
+        status: Integer `SolverStatus` code.
         num_steps: Optimizer iterations attempted.
         gradient_norm: Objective gradient norm at the returned trajectory.
         initial_cost: Objective value at the initial trajectory guess.

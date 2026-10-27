@@ -111,15 +111,18 @@ def care(
 ) -> LQRResult:
     """Solve the continuous algebraic Riccati equation and design a stabilizing gain.
 
+    Solves $A^T S + S A - S B R^{-1} B^T S + Q = 0$ and computes
+    $K = R^{-1} B^T S$.
+
     The baseline solver starts from a Hamiltonian stable-subspace candidate and
     applies residual-decreasing Newton corrections. Poor separation of the
     stable subspace can make the candidate inaccurate; residual and closed-loop
     stability checks report such cases as failures. The stabilizing solution
     requires a stabilizable pair (A, B) and detectable pair (Q**1/2, A).
 
-    Requires float64 mode, real matrices, symmetric positive-semidefinite Q,
-    and positive-definite R. JVPs and VJPs solve the linearized Riccati equation
-    implicitly. The solve composes with `jit` and `vmap`.
+    Uses real matrices with symmetric positive-semidefinite Q and
+    positive-definite R, and requires float64 precision. JVPs and VJPs use
+    implicit differentiation of the Riccati equation.
 
     Args:
         A: State matrix. Shape: `(n, n)`.

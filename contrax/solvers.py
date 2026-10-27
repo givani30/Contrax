@@ -1,8 +1,7 @@
-"""Algorithm configuration objects for numerical solvers.
+"""Configuration objects for numerical solvers.
 
-Solver objects contain static algorithm choices. Close over them in ``jax.jit``
-(or pass them through Equinox transforms); model matrices remain dynamic data.
-Native Diffrax and Optimistix solvers retain their own interfaces.
+Solver objects hold static algorithm choices and tolerances. Close over a
+configuration in ``jax.jit``; model matrices remain dynamic inputs.
 """
 
 import math
@@ -25,9 +24,9 @@ class SolverStatus(IntEnum):
 class Lyapunov(eqx.Module):
     """Configure a continuous- or discrete-time Lyapunov solve.
 
-    ``auto`` tries squared Smith iteration, then a dense solve only for systems
-    with at most ``dense_limit`` states. ``doubling`` requires a stable system;
-    ``dense`` supports any uniquely solvable equation, including unstable A.
+    ``auto`` uses squared Smith iteration with dense fallback when the state
+    count is at most ``dense_limit``. ``doubling`` applies to stable systems;
+    ``dense`` handles any uniquely solvable equation, including unstable A.
     Explicit dense selection permits O(n^4) storage and O(n^6) work.
 
     Attributes:
@@ -97,8 +96,8 @@ class DARE(eqx.Module):
 class CARE(eqx.Module):
     """Configure a Hamiltonian stable-subspace CARE solve with Newton refinement.
 
-    Refinement retains a candidate only if its residual decreases and its
-    feedback remains stabilizing. It cannot repair a missing stable subspace.
+    Refinement accepts corrections that reduce the residual and retain stable
+    feedback. The Hamiltonian must provide a well-separated stable subspace.
 
     Attributes:
         refinement_steps: Maximum Newton corrections of the stabilizing candidate.
@@ -133,14 +132,15 @@ class Kalman(eqx.Module):
 class SteadyStateKalman(eqx.Module):
     """Explicitly reuse a kalman_gain design for a fully observed LTI stream.
 
-    The design is differentiable data, never an implicit cache. Batch filtering
-    defaults P0 to design.P, the predicted covariance before the first update.
-    A different P0, a missing observation or an inconsistent model/noise pair
-    reports invalid_problem. Covariance-form Kalman supports those workflows.
+    Uses the gain design as differentiable data for a fully observed LTI stream.
+    Batch filtering defaults P0 to design.P, the predicted covariance before
+    the first update. A different P0, a missing observation, or an inconsistent
+    model/noise pair reports `invalid_problem`; use covariance-form filtering
+    when those cases are expected.
 
     Attributes:
-        design: KalmanGainResult returned by kalman_gain. Gain and predicted
-            covariance remain dynamic Equinox leaves for JVP/VJP and vmap.
+        design: KalmanGainResult returned by `kalman_gain`. The gain and
+            predicted covariance remain differentiable inputs.
         rtol: Relative tolerance for gain/fixed-point and initialization checks.
         atol: Absolute tolerance for those checks.
     """
@@ -158,11 +158,11 @@ class SteadyStateKalman(eqx.Module):
 class InformationKalman(eqx.Module):
     """Whitened state-space Kalman update for diagonal observation noise.
 
-    Pass R as a positive variance vector of shape (p,). Prior whitening and
-    state-size Cholesky solves avoid a prior inverse and p-by-p innovation
-    factorization. Useful when observations outnumber states. Predicted
-    covariances must be positive definite. Controls and missing observations
-    follow covariance-form Kalman conventions. No covariance repair is applied.
+    Use a positive observation-variance vector `R` with shape `(p,)`. Prior
+    whitening and state-size Cholesky solves make this formulation useful when
+    observations outnumber states. Predicted covariances must be positive
+    definite; controls and missing observations follow covariance-form Kalman
+    conventions.
     """
 
 
@@ -192,8 +192,8 @@ class UKF(eqx.Module):
         beta: Prior-distribution correction; 2 is standard for Gaussian priors.
         kappa: Secondary scaling; n+kappa must be positive for n states.
 
-    Sigma-point covariances and innovation covariances must be positive definite.
-    The filter adds no diagonal jitter or other covariance repair.
+    Sigma-point covariances and innovation covariances must be positive
+    definite. Supply covariances that satisfy this condition before filtering.
     """
 
     alpha: float = eqx.field(static=True, default=1.0)
@@ -208,13 +208,13 @@ class UKF(eqx.Module):
 
 
 class PolePlacement(eqx.Module):
-    """Design-time robust pole assignment and acceptance tolerances.
+    """Configure design-time pole assignment and acceptance tolerances.
 
     Attributes:
         method: auto chooses KNV0 for real poles and YT for complex pairs.
             Explicit KNV0 and YT selections are also accepted.
         rtol: Relative determinant-improvement convergence tolerance.
-        max_steps: Maximum robust eigenvector-update sweeps.
+        max_steps: Maximum eigenvector-update sweeps.
         assignment_rtol: Scale-aware achieved-pole tolerance.
         assignment_atol: Absolute achieved-pole tolerance.
         condition_limit: Maximum controllability/eigenvector condition estimate.

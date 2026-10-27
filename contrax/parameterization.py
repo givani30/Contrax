@@ -9,8 +9,8 @@ from jax.typing import ArrayLike
 def positive_exp(raw: ArrayLike, *, min_value: float = 0.0) -> Array:
     """Map unconstrained values to strictly positive values with `exp`.
 
-    This is useful when optimizing scalar or diagonal quantities that must stay
-    positive, such as noise scales or diagonal design weights.
+    Use it for scalar or diagonal parameters that must stay positive, such as
+    noise scales or design weights.
     """
     raw = jnp.asarray(raw)
     return jnp.exp(raw) + jnp.asarray(min_value, dtype=raw.dtype)

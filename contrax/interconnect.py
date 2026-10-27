@@ -1,4 +1,4 @@
-"""contrax.interconnect — series and parallel LTI interconnections."""
+"""Series and parallel LTI interconnections."""
 
 from __future__ import annotations
 

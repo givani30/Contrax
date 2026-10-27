@@ -1,4 +1,4 @@
-"""contrax.control — LQR, pole placement, closed-loop construction."""
+"""LQR design, pole placement, and closed-loop construction."""
 
 import jax.numpy as jnp
 from jax import Array
@@ -88,9 +88,8 @@ def augment_integrator(
 ) -> DiscLTI | ContLTI:
     """Augment an LTI system with integral-of-output states.
 
-    This is the small design utility behind LQI-style workflows. It returns an
-    augmented system that can be passed to `lqr()` with a state cost that also
-    weights the added integral states.
+    Returns an augmented system for LQI design. Pass it to `lqr()` with a state
+    cost that includes the added integral states.
 
     For continuous systems, the added state evolves as
     `z_dot = sign * (C_integral x + D_integral u)`. For discrete systems, the
@@ -159,9 +158,8 @@ def lqi(
 ) -> LQRResult:
     """Design an LQI gain by augmenting integral states and calling `lqr()`.
 
-    This is intentionally a thin composition of `augment_integrator()` and
-    `lqr()`. The returned gain acts on the augmented state `[x; z]`, where `z`
-    is the integral state.
+    Augments the system with integral states and designs a gain for the
+    resulting state `[x; z]`, where `z` contains the integrated outputs.
 
     Args:
         sys: Continuous or discrete LTI system.
@@ -197,10 +195,9 @@ def state_feedback(sys: DiscLTI | ContLTI, K: Array) -> DiscLTI | ContLTI:
     Returns a new LTI system with `A_cl = A - B @ K` and unchanged `B`, `C`,
     `D`, and, for discrete systems, `dt`.
 
-    This is a pure functional constructor rather than a simulation routine. It
-    dispatches on either [DiscLTI][contrax.systems.DiscLTI] or
-    [ContLTI][contrax.systems.ContLTI] and behaves like normal array algebra
-    under JAX transforms.
+    Accepts either [DiscLTI][contrax.systems.DiscLTI] or
+    [ContLTI][contrax.systems.ContLTI] and preserves its sample time when
+    constructing the closed-loop system.
 
     Args:
         sys: Continuous or discrete-time system.
@@ -246,8 +243,6 @@ def state_feedback(sys: DiscLTI | ContLTI, K: Array) -> DiscLTI | ContLTI:
 def feedback(sys: DiscLTI | ContLTI, K: Array) -> DiscLTI | ContLTI:
     """Alias for `state_feedback()`.
 
-    This alias remains available for MATLAB-style ergonomics, but the more
-    explicit `state_feedback()` name is preferred in new Contrax code because it
-    distinguishes gain application from general closed-loop interconnection.
+    Use `state_feedback()` when naming the gain application explicitly.
     """
     return state_feedback(sys, K)

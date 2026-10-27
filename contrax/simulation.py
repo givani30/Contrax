@@ -1,4 +1,4 @@
-"""Public simulation namespace."""
+"""Simulation and response-analysis functions."""
 
 from contrax.sim import (
     as_ode_term,

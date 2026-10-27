@@ -106,8 +106,8 @@ def ctrb_gramian(
     With no horizon, solves the infinite-horizon equation for a strictly stable
     system. Set `t` for a continuous finite integral or `num_steps` for a
     discrete finite sum; finite horizons also apply to marginal or unstable
-    systems. Requires float64 mode. A discrete horizon is a static Python
-    integer, and each term in the sum has unit weight.
+    systems. Requires float64 precision. A discrete horizon is a static Python
+    integer, and each discrete sum term has unit weight.
 
     Args:
         sys: Continuous or discrete LTI realization.
@@ -146,8 +146,8 @@ def obsv_gramian(
     Uses the dual equation with forcing ``C.T @ C`` and transposed state
     dynamics. With no horizon, the system must be strictly stable. Set `t` for
     a finite continuous integral or `num_steps` for a finite discrete sum; zero
-    horizons are valid. Requires float64 mode. A discrete horizon is a static
-    Python integer, and each term in the sum has unit weight.
+    horizons are valid. Requires float64 precision. A discrete horizon is a
+    static Python integer, and each discrete sum term has unit weight.
 
     Args:
         sys: Continuous or discrete LTI realization.

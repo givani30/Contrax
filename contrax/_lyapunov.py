@@ -136,8 +136,8 @@ def lyapunov(A, Q, *, continuous, solver=None, throw=False):
     O(n**4) storage and O(n**6) work.
 
     The doubling method requires a Hurwitz continuous-time matrix or a
-    Schur-stable discrete-time matrix. Requires real matrices and float64 mode.
-    JAX derivatives use an implicit linear solve for the equation.
+    Schur-stable discrete-time matrix. The equation uses real matrices and
+    float64 precision. JAX derivatives use an implicit linear solve.
 
     Args:
         A: State or transition matrix. Shape: `(n, n)`.

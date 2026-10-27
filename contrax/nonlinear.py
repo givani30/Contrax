@@ -13,18 +13,15 @@ from contrax.types import SampleResult
 
 
 class NonlinearSystem(eqx.Module):
-    """General nonlinear system container.
+    """Container for nonlinear dynamics and an optional output map.
 
-    The reusable model-object contract in Contrax is:
+    Define dynamics with `dynamics(t, x, u)` and the measured output with
+    `output(t, x, u)`.
 
-    - `dynamics(t, x, u)` for the state transition or vector field
-    - `output(t, x, u)` for the measured/output map
-
-    Pass the model directly to estimators to use its dynamics, input-dependent
-    output and sample period. Plain recursive-estimator transitions also take
-    `(t, x, u)`; passing one separately requires an observation function.
-    For discrete models, `step(t, x, u)` returns numerical diagnostics alongside
-    the next state. Sampled models retain their integration diagnostics there.
+    Estimators can use the model's dynamics, input-dependent output, and sample
+    period directly. Recursive-estimator callables use the same `(t, x, u)`
+    signature and require a separate observation function. For discrete models,
+    `step(t, x, u)` returns the next state with numerical diagnostics.
     """
 
     dynamics: Callable
@@ -70,7 +67,7 @@ class NonlinearSystem(eqx.Module):
 
 
 class SupportsNonlinearSystem(Protocol):
-    """Structural protocol for objects implementing the nonlinear-system contract."""
+    """Protocol for objects exposing nonlinear dynamics and an output map."""
 
     dt: Array | None
 
@@ -98,10 +95,9 @@ def nonlinear_system(
 ) -> NonlinearSystem:
     """Construct a reusable nonlinear system model.
 
-    Contrax uses [NonlinearSystem][contrax.systems.NonlinearSystem] as the
-    shared contract for nonlinear simulation, linearization, and estimation.
-    The intended callable shape is `dynamics(t, x, u)` and, when present,
-    `output(t, x, u)`.
+    The model supplies dynamics with signature `dynamics(t, x, u)` and an
+    optional output map with signature `output(t, x, u)`. Use it for nonlinear
+    simulation, linearization, and estimation.
 
     Args:
         dynamics: State transition or vector-field callable with signature
@@ -111,9 +107,7 @@ def nonlinear_system(
         observation: Deprecated synonym for `output`. Pass only one of
             `output` or `observation`.
         dt: Optional discrete sample time. Omit for continuous models.
-        state_dim: Optional static state dimension hint. Contrax does not
-            require this — dimensions are inferred from the matrices passed to
-            `lqr`, `ekf`, etc. Useful only as documentation metadata.
+        state_dim: Optional static state dimension hint for documentation.
         input_dim: Optional static input dimension. Enables omitted zero controls
             in recursive estimators; otherwise provide us for controlled models.
         output_dim: Optional static output dimension hint. Same caveat as
@@ -138,7 +132,7 @@ def nonlinear_system(
 
 
 def _is_system_model(obj: object) -> bool:
-    """Return whether an object implements the Contrax system contract."""
+    """Return whether an object exposes nonlinear or LTI system operations."""
     dynamics = getattr(obj, "dynamics", None)
     output = getattr(obj, "output", None)
     return (callable(dynamics) and callable(output)) or all(

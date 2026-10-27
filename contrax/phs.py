@@ -1,4 +1,4 @@
-"""contrax.phs — structure-preserving Hamiltonian/PHS helpers."""
+"""Port-Hamiltonian systems and structure-preserving helpers."""
 
 from __future__ import annotations
 
@@ -76,7 +76,7 @@ class PHSSystem(eqx.Module):
         return self.observation(t, x, u)
 
     def as_nonlinear_system(self) -> NonlinearSystem:
-        """Expose the PHS model under the generic nonlinear-system contract."""
+        """Return the model as a generic nonlinear system."""
         return NonlinearSystem(
             dynamics=self.dynamics,
             observation=self.output,
@@ -90,17 +90,14 @@ class PHSSystem(eqx.Module):
 class SeparablePHSSystem(PHSSystem):
     """PHSSystem subtype for separable Hamiltonians H(q,p) = V(q) + T(p).
 
-    Carries `V` and `T` as separate callables so structure-preserving
-    integrators (e.g. Störmer-Verlet) can access the gradient split directly
-    without inferring separability from a black-box `H(z)`.
+    Stores `V` and `T` as separate callables so structure-preserving integrators
+    such as Störmer-Verlet can use their gradients directly.
 
     The stored `H` is always the derived `V(q) + T(p)`.  All PHS behaviour
     (dynamics, diagnostics, simulation) falls through to `PHSSystem` unchanged.
 
-    Construct via `separable_phs_system()`, not directly.  The `None`/`0`
-    sentinels on `V`, `T`, and `n_dofs` exist only to satisfy Python dataclass
-    inheritance ordering (parent fields with defaults must precede child fields).
-    `__check_init__` enforces that the object is always valid after construction.
+    Create instances with `separable_phs_system()`, which validates the fields
+    and derives the Hamiltonian from `V` and `T`.
     """
 
     V: Callable[[Array], Array] | None = None
@@ -135,11 +132,10 @@ def separable_phs_system(
     """Construct a separable port-Hamiltonian system.
 
     Builds a [SeparablePHSSystem][contrax.systems.SeparablePHSSystem] whose
-    Hamiltonian is `H(q, p) = V(q) + T(p)`.  This separability is structural —
-    the split is stored explicitly rather than inferred from a black-box
-    `H(z)` callable. `sample_system(method="sv")` requires this type with the
-    default canonical J; non-symplectic integrators and all other Contrax
-    operations treat it identically to a `PHSSystem`.
+    Hamiltonian is `H(q, p) = V(q) + T(p)`. The potential and kinetic energy
+    remain separate model fields. `sample_system(method="sv")` requires this
+    type with the default canonical `J`; other methods use the ordinary
+    `PHSSystem` interface.
 
     Args:
         V: Potential energy `V(q)`. Maps `(n_dofs,) -> scalar`.
@@ -385,10 +381,8 @@ def schedule_phs(
 ) -> NonlinearSystem:
     """Bind an exogenous schedule/context to a canonical PHS model.
 
-    The returned object is an ordinary
-    [NonlinearSystem][contrax.systems.NonlinearSystem], so it composes with the
-    same simulation, estimation, and linearization surface as any other
-    nonlinear system in Contrax.
+    The returned object is a [NonlinearSystem][contrax.systems.NonlinearSystem]
+    accepted by simulation, estimation, and linearization functions.
 
     `context_fn(t)` should be a pure JAX-friendly callable returning any pytree
     of observed scheduling/context variables, such as a scale parameter
@@ -466,11 +460,8 @@ def phs_to_ss(
     For a linear PHS with quadratic Hamiltonian `H(x) = ½ x^T M x`, the
     linearization is exact and gives `A = (J - R) M`, `B = G`.
 
-    This is a thin convenience wrapper around
-    `linearize_ss(sys.as_nonlinear_system(), x_eq, u_eq, t=0.0)`. It adds
-    an explicit PHS-to-state-space path so that the intent is documented and
-    the connection between the PHS model and its LTI state-space representation
-    is clear.
+    Calls `linearize_ss` on the system's nonlinear representation at time zero
+    and returns the local LTI model.
 
     Args:
         sys: Port-Hamiltonian system.
