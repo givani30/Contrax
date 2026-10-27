@@ -2,29 +2,29 @@
 
 from typing import Callable
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import optimistix as optx
 from jax import Array
 
+from contrax._mhe_model import model_predictions, validate_window
+from contrax.core import DiscLTI
+from contrax.nonlinear import SupportsNonlinearSystem
+from contrax.solvers import SolverStatus
 from contrax.types import MHEResult
 
 
-def _call_transition(
-    f: Callable[..., Array],
-    x: Array,
-    u: Array,
-    params: object | None,
-) -> Array:
-    return f(x, u) if params is None else f(x, u, params)
+class _BestSoFarMinimiser(optx.BestSoFarMinimiser):
+    """Keep the accepted-cost accumulator in the objective's precision."""
 
-
-def _call_observation(
-    h: Callable[..., Array],
-    x: Array,
-    params: object | None,
-) -> Array:
-    return h(x) if params is None else h(x, params)
+    def init(self, fn, y, args, options, f_struct, aux_struct, tags):
+        state = super().init(fn, y, args, options, f_struct, aux_struct, tags)
+        # Optimistix's best-so-far initializer uses the global default dtype.
+        # A float32 objective needs a float32 accumulator in the while-loop carry.
+        return eqx.tree_at(
+            lambda s: s.best_loss, state, jnp.asarray(jnp.inf, dtype=f_struct.dtype)
+        )
 
 
 def _weighted_sum_squares(residuals: Array, covariance: Array) -> Array:
@@ -62,15 +62,14 @@ def mhe_warm_start(
     not a full arrival-update policy.
     """
     xs = jnp.asarray(xs)
-    if xs.ndim < 2:
+    if xs.ndim < 2 or xs.shape[0] == 0:
         raise ValueError("mhe_warm_start() expects a state trajectory with time axis.")
     tail = xs[-1] if transition is None else transition(xs[-1], terminal_input)
     return jnp.concatenate([xs[1:], tail[None]], axis=0)
 
 
 def mhe_objective(
-    f: Callable[..., Array],
-    h: Callable[..., Array],
+    model_or_f: DiscLTI | SupportsNonlinearSystem | Callable[..., Array],
     xs: Array,
     us: Array,
     ys: Array,
@@ -78,15 +77,20 @@ def mhe_objective(
     P_prior: Array,
     Q_noise: Array,
     R_noise: Array,
+    *,
+    observation: Callable[..., Array] | None = None,
     params: object | None = None,
     extra_cost: Callable[..., Array] | None = None,
+    ts: Array | None = None,
+    measurement_us: Array | None = None,
 ) -> Array:
     """Evaluate a fixed-window moving-horizon-estimation objective.
 
-    This is the first MHE primitive in Contrax: a pure cost function, not a
-    solver. The candidate state trajectory is explicit in `xs`, so callers can
-    optimize it with their preferred JAX-native solver while keeping fixed
-    horizon shapes.
+    The candidate state trajectory is explicit in `xs`, so callers can optimize
+    it with any JAX-native solver. Accepts discrete LTI or nonlinear system
+    models, or callable transitions with an explicit observation function.
+    There are N states/measurements and N-1 transitions/inputs. Supports `jit`,
+    `vmap`, JVP and VJP for fixed shapes and differentiable model data.
 
     The objective is a weighted nonlinear least-squares cost:
 
@@ -96,32 +100,40 @@ def mhe_objective(
     - optional user `extra_cost(xs, us, ys, params)`
 
     Args:
-        f: Transition function. Called as `f(x, u)` when `params=None`, and
-            `f(x, u, params)` otherwise.
-        h: Observation function. Called as `h(x)` when `params=None`, and
-            `h(x, params)` otherwise.
-        xs: Candidate state trajectory. Shape: `(T + 1, n)`.
-        us: Input sequence. Shape: `(T, m)`.
-        ys: Measurement sequence aligned with `xs`. Shape: `(T + 1, p)`.
+        model_or_f: Discrete system model, or transition callable `f(x, u)`
+            (`f(x, u, params)` when params are supplied).
+        xs: Candidate state trajectory. Shape: `(N, n)`, N >= 1.
+        us: Transition input sequence. Shape: `(N-1, m)`.
+        ys: Measurement sequence aligned with xs. Shape: `(N, p)`.
         x_prior: Prior state for the start of the window. Shape: `(n,)`.
         P_prior: Arrival covariance. Shape: `(n, n)`.
         Q_noise: Process noise covariance. Shape: `(n, n)`.
         R_noise: Measurement noise covariance. Shape: `(p, p)`.
+        observation: Required for callable transitions; `h(x)` or `h(x, params)`.
         params: Optional parameters passed to `f`, `h`, and `extra_cost`.
         extra_cost: Optional callable adding additional smooth costs.
             Called as `extra_cost(xs, us, ys)` when `params=None`, and
             `extra_cost(xs, us, ys, params)` otherwise.
+        ts: Sample times for system-model callables. Shape: `(N,)`. Defaults to
+            integer steps multiplied by the model sample period when available.
+        measurement_us: Observation inputs. Shape: `(N, m)`. Defaults to us
+            with the last input held at the terminal observation (zero for N=1).
 
     Returns:
         Array: Scalar MHE cost.
     """
+    validate_window(xs, us, ys, x_prior, P_prior, Q_noise, R_noise)
     arrival_residual = xs[0] - x_prior
-    x_pred = jax.vmap(lambda x, u: _call_transition(f, x, u, params))(
-        xs[:-1],
+    x_pred, y_pred = model_predictions(
+        model_or_f,
+        observation,
+        xs,
         us,
+        params,
+        ts,
+        measurement_us,
     )
     process_residuals = xs[1:] - x_pred
-    y_pred = jax.vmap(lambda x: _call_observation(h, x, params))(xs)
     measurement_residuals = ys - y_pred
 
     cost = (
@@ -138,8 +150,7 @@ def mhe_objective(
 
 
 def mhe(
-    f: Callable[..., Array],
-    h: Callable[..., Array],
+    model_or_f: DiscLTI | SupportsNonlinearSystem | Callable[..., Array],
     xs_init: Array,
     us: Array,
     ys: Array,
@@ -147,10 +158,15 @@ def mhe(
     P_prior: Array,
     Q_noise: Array,
     R_noise: Array,
+    *,
+    observation: Callable[..., Array] | None = None,
     params: object | None = None,
     extra_cost: Callable[..., Array] | None = None,
     solver: optx.AbstractMinimiser | None = None,
     max_steps: int = 256,
+    ts: Array | None = None,
+    measurement_us: Array | None = None,
+    throw: bool = False,
 ) -> MHEResult:
     """Solve a fixed-window moving-horizon-estimation problem.
 
@@ -164,19 +180,24 @@ def mhe(
     full trajectory `xs` matches the RTS smoother output within solver
     tolerance.
 
+    The best finite accepted iterate is retained on iteration limits. Inspect
+    status and gradient_norm before using a nonconverged estimate. Implicit
+    JVP/VJP derivatives assume a converged local stationary point with a
+    nonsingular objective Hessian; they do not differentiate the search history.
+    Model, noise and optional parameter data are explicit optimizer arguments.
+
     Args:
-        f: Transition function.  Called as `f(x, u)` when `params=None`,
-            and `f(x, u, params)` otherwise.
-        h: Observation function.  Called as `h(x)` when `params=None`,
-            and `h(x, params)` otherwise.
-        xs_init: Initial trajectory guess.  Shape: `(T, n)`.  Using the
+        model_or_f: Discrete system model or callable transition `f(x, u)`
+            (`f(x, u, params)` when params are supplied).
+        xs_init: Initial trajectory guess. Shape: `(N, n)`, N >= 1. Using the
             Kalman filtered means as a warm start is recommended.
-        us: Input sequence.  Shape: `(T - 1, m)`.
-        ys: Measurement sequence aligned with `xs`.  Shape: `(T, p)`.
+        us: Input sequence. Shape: `(N - 1, m)`.
+        ys: Measurement sequence aligned with xs. Shape: `(N, p)`.
         x_prior: Prior mean for the start of the window.  Shape: `(n,)`.
         P_prior: Arrival covariance.  Shape: `(n, n)`.
         Q_noise: Process noise covariance.  Shape: `(n, n)`.
         R_noise: Measurement noise covariance.  Shape: `(p, p)`.
+        observation: Required for callable transitions; `h(x)` or `h(x, params)`.
         params: Optional parameters passed to `f`, `h`, and `extra_cost`.
         extra_cost: Optional callable adding additional smooth costs.
             Called as `extra_cost(xs, us, ys)` when `params=None`, and
@@ -184,6 +205,10 @@ def mhe(
         solver: Optimistix minimiser.  Defaults to
             `optx.LBFGS(rtol=1e-6, atol=1e-6)`.
         max_steps: Maximum solver iterations.  Defaults to 256.
+        ts: System-model sample times. Shape: `(N,)`.
+        measurement_us: Observation inputs. Shape: `(N, m)`. Defaults to
+            holding the final transition control for the final observation.
+        throw: Raise on failed convergence; otherwise return status diagnostics.
 
     Returns:
         [MHEResult][contrax.types.MHEResult]: Estimated trajectory, terminal
@@ -196,11 +221,9 @@ def mhe(
         ...     jnp.array([[0.8]]), jnp.zeros((1, 1)),
         ...     jnp.array([[1.0]]), jnp.zeros((1, 1)), dt=1.0,
         ... )
-        >>> f = lambda x, u: sys.A @ x
-        >>> h = lambda x: sys.C @ x
         >>> ys = jnp.array([[0.1], [0.4], [0.6], [0.5], [0.4]])
         >>> result = cx.mhe(
-        ...     f, h,
+        ...     sys,
         ...     xs_init=jnp.zeros((5, 1)),
         ...     us=jnp.zeros((4, 1)),
         ...     ys=ys,
@@ -212,12 +235,29 @@ def mhe(
     """
     if solver is None:
         solver = optx.LBFGS(rtol=1e-6, atol=1e-6)
+    if not isinstance(solver, optx.AbstractMinimiser):
+        raise TypeError("solver must be an Optimistix minimiser")
+    if not isinstance(max_steps, int) or max_steps < 0:
+        raise ValueError("max_steps must be a nonnegative integer")
+    validate_window(xs_init, us, ys, x_prior, P_prior, Q_noise, R_noise)
 
     def fn(xs, args):
-        us_, ys_, x_prior_, P_prior_, Q_noise_, R_noise_ = args
+        (
+            model,
+            obs,
+            us_,
+            ys_,
+            x_prior_,
+            P_prior_,
+            Q_noise_,
+            R_noise_,
+            params_,
+            extra,
+            ts_,
+            measurement_us_,
+        ) = args
         return mhe_objective(
-            f,
-            h,
+            model,
             xs,
             us_,
             ys_,
@@ -225,18 +265,83 @@ def mhe(
             P_prior_,
             Q_noise_,
             R_noise_,
-            params,
-            extra_cost,
+            observation=obs,
+            params=params_,
+            extra_cost=extra,
+            ts=ts_,
+            measurement_us=measurement_us_,
         )
 
-    args = (us, ys, x_prior, P_prior, Q_noise, R_noise)
-    sol = optx.minimise(
-        fn, solver, xs_init, args=args, max_steps=max_steps, throw=False
+    # All differentiable model/noise/parameter data is explicit optimizer data,
+    # so the implicit optimality-system derivative includes those dependencies.
+    args = (
+        model_or_f,
+        observation,
+        us,
+        ys,
+        x_prior,
+        P_prior,
+        Q_noise,
+        R_noise,
+        params,
+        extra_cost,
+        ts,
+        measurement_us,
     )
+    initial_cost = fn(xs_init, args)
+    try:
+        sol = optx.minimise(
+            fn,
+            _BestSoFarMinimiser(solver),
+            xs_init,
+            args=args,
+            max_steps=max_steps,
+            throw=False,
+        )
+    except TypeError as error:
+        # Optimistix LBFGS versions that allocate history without a dtype use
+        # JAX's default precision, which can mismatch explicit float32 states.
+        # Preserve the user's arrays and global precision configuration.
+        if (
+            type(solver) is optx.LBFGS
+            and xs_init.dtype == jnp.float32
+            and jax.config.jax_enable_x64
+        ):
+            raise ValueError(
+                "Optimistix LBFGS could not initialize float32 MHE with x64 enabled. "
+                "For a small window, pass "
+                "solver=optimistix.BFGS(rtol=1e-6, atol=1e-6), "
+                "or select a float32 JAX context explicitly. No precision was changed."
+            ) from error
+        raise
     xs_opt = sol.value
+    final_cost = fn(xs_opt, args)
+    finite = jnp.all(jnp.isfinite(xs_opt)) & jnp.isfinite(final_cost)
+    converged = sol.result == optx.RESULTS.successful
+    status = jnp.where(
+        ~finite,
+        int(SolverStatus.numerical_failure),
+        jnp.where(
+            converged,
+            int(SolverStatus.successful),
+            jnp.where(
+                sol.result == optx.RESULTS.nonlinear_max_steps_reached,
+                int(SolverStatus.max_steps_reached),
+                int(SolverStatus.numerical_failure),
+            ),
+        ),
+    )
+    if throw:
+        xs_opt = eqx.error_if(
+            xs_opt, status != 0, "MHE solve failed; inspect status and gradient_norm"
+        )
     return MHEResult(
         xs=xs_opt,
         x_hat=xs_opt[-1],
-        final_cost=fn(xs_opt, args),
-        solver_converged=sol.result == optx.RESULTS.successful,
+        final_cost=final_cost,
+        solver_converged=converged,
+        status=status,
+        num_steps=sol.stats["num_steps"],
+        gradient_norm=jnp.linalg.norm(jax.grad(fn)(xs_opt, args)),
+        initial_cost=initial_cost,
     )

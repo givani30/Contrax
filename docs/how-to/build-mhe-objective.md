@@ -26,7 +26,7 @@ ys = jax.vmap(lambda x: h(x, params))(xs)
 
 cost = cx.mhe_objective(
     f,
-    h,
+    observation=h,
     xs=xs,
     us=us,
     ys=ys,
@@ -42,9 +42,9 @@ cost = cx.mhe_objective(
 
 The important shape rule is:
 
-- `xs`: `(T + 1, n)`
-- `us`: `(T, m)`
-- `ys`: `(T + 1, p)`
+- `xs`: `(N, n)`
+- `us`: `(N - 1, m)`
+- `ys`: `(N, p)`
 
 That alignment matches:
 

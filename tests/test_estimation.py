@@ -287,7 +287,6 @@ def test_mhe_objective_zero_for_exact_nonlinear_window():
 
     cost = cx.mhe_objective(
         f,
-        h,
         xs,
         us,
         ys,
@@ -296,6 +295,7 @@ def test_mhe_objective_zero_for_exact_nonlinear_window():
         Q_noise=jnp.eye(1),
         R_noise=jnp.eye(1),
         params={"a": 0.5, "c": 2.0},
+        observation=h,
     )
 
     assert jnp.allclose(cost, 0.0, atol=1e-12)
@@ -317,7 +317,7 @@ def test_mhe_objective_matches_manual_linear_gaussian_cost():
     def h(x):
         return sys.C @ x
 
-    cost = cx.mhe_objective(f, h, xs, us, ys, x_prior, P, Q, R)
+    cost = cx.mhe_objective(f, xs, us, ys, x_prior, P, Q, R, observation=h)
     arrival = (xs[0, 0] - x_prior[0]) ** 2 / P[0, 0]
     process = jnp.sum((xs[1:, 0] - 0.8 * xs[:-1, 0]) ** 2 / Q[0, 0])
     measurement = jnp.sum((ys[:, 0] - xs[:, 0]) ** 2 / R[0, 0])
@@ -343,7 +343,6 @@ def test_mhe_objective_jit_grad_and_extra_cost():
     def objective(candidate_xs):
         return cx.mhe_objective(
             f,
-            h,
             candidate_xs,
             us,
             ys,
@@ -353,6 +352,7 @@ def test_mhe_objective_jit_grad_and_extra_cost():
             R_noise=0.2 * jnp.eye(1),
             params={"a": 0.8, "soft": 0.1},
             extra_cost=extra_cost,
+            observation=h,
         )
 
     cost = jax.jit(objective)(xs)
@@ -713,7 +713,7 @@ def test_mhe_shapes_and_convergence():
 
     result = cx.mhe(
         f,
-        h,
+        observation=h,
         xs_init=jnp.zeros((T, 1)),
         us=jnp.zeros((T - 1, 1)),
         ys=ys,
@@ -778,7 +778,7 @@ def test_mhe_matches_rts_smoother_linear_gaussian():
 
     result = cx.mhe(
         f,
-        h,
+        observation=h,
         xs_init=filtered.x_hat,
         us=jnp.zeros((T - 1, 1)),
         ys=ys,
@@ -846,7 +846,7 @@ def test_mhe_accepts_soft_penalty_helper_in_extra_cost():
 
     result = cx.mhe(
         f,
-        h,
+        observation=h,
         xs_init=jnp.zeros((4, 1)),
         us=jnp.zeros((3, 1)),
         ys=ys,

@@ -173,19 +173,32 @@ class MHEResult(eqx.Module):
     """Result bundle for a fixed-window moving-horizon-estimation solve.
 
     Attributes:
-        xs: Estimated state trajectory over the window. Shape: `(T, n)`.
+        xs: Estimated state trajectory over the window. Shape: `(N, n)`.
         x_hat: Terminal state estimate, equal to `xs[-1]`. Shape: `(n,)`.
             This is the estimate passed to downstream controllers or observers.
         final_cost: Final MHE objective value. Shape: scalar.
         solver_converged: Whether the underlying optimizer reported convergence.
-            Shape: scalar bool. Note: LBFGS may report ``False`` even when the
-            solution is numerically useful; check ``final_cost`` directly.
+            Shape: scalar bool. False means convergence was not established;
+            inspect status, cost reduction and gradient_norm before use.
+        status: Integer `contrax.solvers.SolverStatus` code.
+        num_steps: Optimizer iterations attempted.
+        gradient_norm: Objective gradient norm at the returned trajectory.
+        initial_cost: Objective value at the initial trajectory guess.
+        successful: Whether convergence succeeded with a finite trajectory/cost.
     """
 
     xs: Array
     x_hat: Array
     final_cost: Array
     solver_converged: Array
+    status: Array
+    num_steps: Array
+    gradient_norm: Array
+    initial_cost: Array
+
+    @property
+    def successful(self) -> Array:
+        return self.status == jnp.asarray(0)
 
 
 class PHSStructureDiagnostics(eqx.Module):

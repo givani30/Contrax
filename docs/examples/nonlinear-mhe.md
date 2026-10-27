@@ -48,30 +48,24 @@ enforced structurally, not by an inequality constraint or a projection step.
 ```
 
 `mhe()` minimizes `mhe_objective()` over the full window trajectory using
-LBFGS. The Kalman-style prior term (`x_prior`, `P_prior`) regularizes the
+LBFGS and accepts the nonlinear system model directly. The window has N states
+and measurements, with N−1 input transitions. The Kalman-style prior term (`x_prior`, `P_prior`) regularizes the
 start of the window, and `Q_noise` controls how much the parameter is allowed
 to drift across the horizon.
 
 ## What the Script Prints
 
-```text
-Nonlinear MHE — damped pendulum with parameter estimation
-  converged           = False (LBFGS may report False before tolerance; check cost)
-  final cost          = 5.6983e+00
-  damping: true=0.300  estimated=0.680
-  angle at window end:
-    true      = 0.6481 rad
-    estimated = 0.6552 rad
-
-All assertions passed.
-```
+The script reports convergence, status, gradient norm, final cost, estimated
+damping and terminal angle alongside the ground truth. It also checks positive
+damping and terminal-angle accuracy.
 
 The angle estimate is close to ground truth. The damping estimate is biased
 because a 12-step window with a slowly-varying random-walk prior is a
 short identification horizon for a single scalar parameter — longer windows
 or a tighter prior on $b_\text{raw}$ dynamics improve convergence. The
-`solver_converged=False` flag reflects LBFGS tolerance reporting, not a
-failed solve; checking `final_cost` directly is more informative.
+`solver_converged=False` flag means convergence was not established. The finite
+accepted estimate may still be useful, but inspect status, gradient norm and
+cost reduction before using it or interpreting implicit gradients.
 
 ## Related Pages
 

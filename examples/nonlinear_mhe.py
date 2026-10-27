@@ -108,10 +108,14 @@ def run_mhe(xs_phys, ys, us):
 
     # Warm-start: replicate prior across window
     xs_init = jnp.tile(x_prior, (WINDOW + 1, 1))
+    model = cx.nonlinear_system(
+        lambda t, x, u: aug_dynamics(x, u),
+        output=lambda t, x, u: aug_observation(x),
+        dt=DT,
+    )
 
     result = cx.mhe(
-        aug_dynamics,
-        aug_observation,
+        model,
         xs_init,
         us_win,
         ys_win,
@@ -147,6 +151,8 @@ def run_example():
 
     return {
         "converged": bool(result.solver_converged),
+        "status": int(result.status),
+        "gradient_norm": float(result.gradient_norm),
         "final_cost": float(result.final_cost),
         "true_damping": DAMPING_TRUE,
         "estimated_damping": b_est,
@@ -158,10 +164,9 @@ def run_example():
 def main():
     result = run_example()
     print("Nonlinear MHE — damped pendulum with parameter estimation")
-    print(
-        f"  converged           = {result['converged']} "
-        f"(LBFGS may report False before tolerance; check cost)"
-    )
+    print(f"  converged           = {result['converged']}")
+    print(f"  status              = {result['status']}")
+    print(f"  gradient norm       = {result['gradient_norm']:.4e}")
     print(f"  final cost          = {result['final_cost']:.4e}")
     print(
         f"  damping: true={result['true_damping']:.3f}  "

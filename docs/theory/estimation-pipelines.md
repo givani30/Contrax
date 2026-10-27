@@ -239,8 +239,8 @@ filters:
 $$
 J_{\mathrm{MHE}} =
 \|x_0 - x_{\mathrm{prior}}\|_{P^{-1}}^2 +
-\sum_{k=0}^{T-1}\|x_{k+1} - f(t_k, x_k, u_k)\|_{Q^{-1}}^2 +
-\sum_{k=0}^{T}\|y_k - h(t_k, x_k, u_k)\|_{R^{-1}}^2
+\sum_{k=0}^{N-2}\|x_{k+1} - f(t_k, x_k, u_k)\|_{Q^{-1}}^2 +
+\sum_{k=0}^{N-1}\|y_k - h(t_k, x_k, u_k)\|_{R^{-1}}^2
 $$
 
 ## Choosing Between The Current Paths

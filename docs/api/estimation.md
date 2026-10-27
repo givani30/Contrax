@@ -267,12 +267,40 @@ $$
 $$
 J_{\mathrm{MHE}} =
 \|x_0 - x_{\mathrm{prior}}\|_{P^{-1}}^2 +
-\sum_{k=0}^{T-1}\|x_{k+1} - f(t_k, x_k, u_k)\|_{Q^{-1}}^2 +
-\sum_{k=0}^{T}\|y_k - h(t_k, x_k, u_k)\|_{R^{-1}}^2
+\sum_{k=0}^{N-2}\|x_{k+1} - f(t_k, x_k, u_k)\|_{Q^{-1}}^2 +
+\sum_{k=0}^{N-1}\|y_k - h(t_k, x_k, u_k)\|_{R^{-1}}^2
 $$
 
 This is the optimization sibling of the recursive filters: the same model and
 noise assumptions appear, but they are expressed as an explicit horizon cost.
+
+Pass a discrete LTI or nonlinear system directly: `mhe(model, xs_init, us, ys,
+x_prior, P_prior, Q_noise, R_noise)`. The window contains N states and
+measurements, with N−1 transition inputs; a one-state window is valid. For
+input-dependent measurements, `measurement_us` supplies N controls; its default
+holds the last transition input at the final observation (zero for N=1).
+`ts` supplies explicit sample times for time-dependent models. Callable
+transitions accept `f(x, u)` and require `observation=h` separately.
+
+Native Optimistix minimizers are accepted through `solver=`. The wrapper retains
+the best finite accepted iterate when the iteration limit is reached and
+returns `.status`, `.successful`, `.num_steps`, `.gradient_norm`, `.initial_cost`
+and `.final_cost`. `throw=True` enables checked convergence failures. An
+approximate finite estimate is not reported as successful merely because its
+cost decreased.
+
+Implicit JVP/VJP derivatives include model, noise and explicit parameter data
+passed through optimizer arguments. They assume a converged stationary point
+with a nonsingular Hessian. Check convergence before interpreting derivatives
+of a limited or ill-conditioned solve.
+
+Optimistix LBFGS versions that allocate history in JAX's default dtype cannot
+initialize float32 trajectories while x64 mode is enabled. Contrax preserves
+the arrays and reports this configuration error. A validated option for small
+float32 windows in that context is native `optx.BFGS(rtol=1e-6, atol=1e-6)`;
+its dense Hessian storage grows quadratically in the window's variable count.
+Alternatively, select a float32 JAX context explicitly before solving. Contrax
+does not change global precision to accommodate an optimizer.
 
 For rolling-window use:
 
