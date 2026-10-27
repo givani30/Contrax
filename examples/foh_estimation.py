@@ -8,7 +8,7 @@ Demonstrates:
 - ``sample_system()`` with ``input_interpolation="foh"`` to build a discrete
   transition model that linearly interpolates inputs within each sample period.
 - ``foh_inputs()`` to package a raw input sequence into (u_k, u_{k+1}) pairs.
-- Online EKF step helpers (``ekf_predict``, ``ekf_update``) for a loop that
+- Online EKF step helpers (``ekf_predict``, ``ekf_update``) in a compiled scan that
   updates the covariance at each measurement.
 """
 
@@ -83,28 +83,37 @@ def generate_trajectory(seed: int = 0):
 
 
 # --8<-- [start:filter]
-def run_ekf(xs_true, ys, us_foh):
+def run_ekf(ys, us_foh):
     """Run an online EKF using FOH-sampled discrete model."""
     Q_noise = jnp.diag(jnp.array([1e-4, 1e-3]))
     R_noise = jnp.array([[0.05]])
-
-    def h(x):
-        return x[:1]
-
-    def f_foh(t, x, u_pair):
-        return discrete_foh.dynamics(t, x, u_pair)
 
     x = ys[0, :1]  # initialise from first measurement
     x = jnp.concatenate([x, jnp.zeros(1)])
     P = jnp.eye(2) * 0.5
 
-    xs_est = [x]
-    for k in range(T_STEPS):
-        x, P = cx.ekf_predict(f_foh, x, P, u=us_foh[k], Q=Q_noise)
-        x, P, _ = cx.ekf_update(h, x, P, ys[k + 1], R=R_noise)
-        xs_est.append(x)
+    def step(carry, inputs):
+        mean, covariance = carry
+        t, u_pair, y = inputs
+        prediction = cx.ekf_predict(
+            discrete_foh, mean, covariance, u=u_pair, Q=Q_noise, t=t
+        )
+        # The measurement follows the transition, at the right input endpoint.
+        measurement_u = jnp.stack([u_pair[-1], u_pair[-1]])
+        update = cx.ekf_update(
+            discrete_foh,
+            prediction.x,
+            prediction.P,
+            y,
+            u=measurement_u,
+            R=R_noise,
+            t=t + DT,
+        )
+        return (update.x, update.P), update.x
 
-    return jnp.stack(xs_est)  # (T+1, 2)
+    times = jnp.arange(us_foh.shape[0]) * DT
+    _, xs_est = jax.lax.scan(step, (x, P), (times, us_foh, ys[1:]))
+    return jnp.concatenate([x[None], xs_est])  # (T+1, 2)
 
 
 # --8<-- [end:filter]
@@ -112,7 +121,7 @@ def run_ekf(xs_true, ys, us_foh):
 
 def run_example():
     xs_true, ys, us_raw, us_foh = generate_trajectory()
-    xs_est = run_ekf(xs_true, ys, us_foh)
+    xs_est = run_ekf(ys, us_foh)
 
     rmse_pos = float(jnp.sqrt(jnp.mean((xs_true[:, 0] - xs_est[:, 0]) ** 2)))
     rmse_vel = float(jnp.sqrt(jnp.mean((xs_true[:, 1] - xs_est[:, 1]) ** 2)))

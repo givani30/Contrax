@@ -54,9 +54,10 @@ a raw `(T, m)` sequence into the `(T, 2, m)` pairs the model expects.
 --8<-- "examples/foh_estimation.py:filter"
 ```
 
-The EKF loop uses the one-step helpers `ekf_predict` and `ekf_update`. The
-FOH-discrete model is passed as the dynamics callable, so the filter linearizes
-it automatically via JAX Jacobians.
+The EKF uses `ekf_predict` and `ekf_update` inside one `jax.lax.scan`, compiling
+the time loop once. The sampled system object supplies dynamics, observation
+and integration diagnostics; JAX computes the local Jacobians. Prediction uses
+the interval's FOH pair, and the following measurement uses its right endpoint.
 
 ## What the Script Prints
 
