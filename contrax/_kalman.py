@@ -1,18 +1,23 @@
-"""contrax._kalman — Linear Kalman filter, gain design, and RTS smoother."""
+"""Linear Kalman filtering and online prediction/update helpers."""
 
 import jax
 import jax.numpy as jnp
 from jax import Array
+from jax.scipy.linalg import cho_solve
 
 from contrax._filter_checks import checked, input_status, prepare_state
 from contrax._filter_common import prepare_filter
-from contrax._riccati import dare
+from contrax._linear_filter_options import (
+    cached_filter,
+    cached_update,
+    information_update,
+    noise_status,
+)
 from contrax.core import DiscLTI
-from contrax.solvers import DARE, Kalman
+from contrax.solvers import InformationKalman, Kalman, SteadyStateKalman
 from contrax.types import (
     FilterPredictionResult,
     FilterUpdateResult,
-    KalmanGainResult,
     KalmanResult,
 )
 
@@ -80,7 +85,7 @@ def kalman_update(
     R: Array,
     u: Array | None = None,
     has_measurement: Array | bool = True,
-    solver: Kalman | None = None,
+    solver: Kalman | SteadyStateKalman | InformationKalman | None = None,
     throw: bool = False,
 ) -> FilterUpdateResult:
     """Update one linear Kalman filter step.
@@ -94,11 +99,14 @@ def kalman_update(
         x_pred: Predicted mean. Shape: `(n,)`.
         P_pred: Predicted covariance. Shape: `(n, n)`.
         y: Measurement vector. Shape: `(p,)`.
-        R: Measurement noise covariance. Shape: `(p, p)`.
+        R: Measurement noise covariance, shape `(p, p)`, or a positive variance
+            vector `(p,)` with InformationKalman.
         u: Optional input for direct-feedthrough measurement models. Shape:
             `(m,)`. If omitted, the feedthrough term is zero.
         has_measurement: Whether to apply the measurement update.
-        solver: Joseph (default) or compact covariance-update configuration.
+        solver: Kalman (Joseph by default), InformationKalman for diagonal R,
+            or SteadyStateKalman for an explicit cached design. Cached mode
+            requires P_pred to match design.P and an available observation.
 
         throw: Raise on numerical failure; otherwise inspect status.
 
@@ -108,16 +116,31 @@ def kalman_update(
         and measurement residual. Missing-measurement steps return a zero
         innovation with the same shape as `y`.
     """
-    x_pred, P_pred, R = prepare_state(x_pred, P_pred, R, measurement=y)
-    u = _zero_input(sys, x_pred) if u is None else u
     solver = Kalman() if solver is None else solver
-    if not isinstance(solver, Kalman):
-        raise TypeError("kalman_update solver must be contrax.solvers.Kalman")
+    if not isinstance(solver, (Kalman, SteadyStateKalman, InformationKalman)):
+        raise TypeError("solver must be Kalman, SteadyStateKalman or InformationKalman")
+    information = isinstance(solver, InformationKalman)
+    x_pred, P_pred, R = prepare_state(
+        x_pred,
+        P_pred,
+        R,
+        measurement=y,
+        diagonal_noise=information,
+    )
+    u = _zero_input(sys, x_pred) if u is None else u
+    available = _measurement_flag(has_measurement)
+    if information:
+        result = information_update(sys, x_pred, P_pred, y, R, u, available)
+        return checked(result, throw, "Kalman update failed; inspect status")
+    if isinstance(solver, SteadyStateKalman):
+        result = cached_update(sys, x_pred, P_pred, y, R, u, available, solver)
+        return checked(result, throw, "Kalman update failed; inspect status")
 
     def apply_update():
         y_pred = sys.C @ x_pred + sys.D @ u
         S = sys.C @ P_pred @ sys.C.T + R
-        K = jnp.linalg.solve(S.T, (P_pred @ sys.C.T).T).T
+        factor = jnp.linalg.cholesky(S)
+        K = cho_solve((factor, True), (P_pred @ sys.C.T).T).T
         # vmap lowers cond to selection; keep inactive NaN measurements out of
         # arithmetic as well as keeping all work inside the scalar branch.
         observed = jnp.where(_measurement_flag(has_measurement), y, jnp.zeros_like(y))
@@ -148,7 +171,7 @@ def kalman_step(
     R: Array,
     u: Array | None = None,
     has_measurement: Array | bool = True,
-    solver: Kalman | None = None,
+    solver: Kalman | SteadyStateKalman | InformationKalman | None = None,
     u_measurement: Array | None = None,
     throw: bool = False,
 ) -> FilterUpdateResult:
@@ -164,10 +187,11 @@ def kalman_step(
         P: Filtered covariance at the previous time step. Shape: `(n, n)`.
         y: Measurement vector. Shape: `(p,)`.
         Q: Process noise covariance. Shape: `(n, n)`.
-        R: Measurement noise covariance. Shape: `(p, p)`.
+        R: Measurement covariance `(p, p)`, or variances `(p,)` in information mode.
         u: Optional input. Shape: `(m,)`.
         has_measurement: Whether to apply the measurement update.
-        solver: Covariance-update configuration shared with batch filtering.
+        solver: Covariance, information or explicit cached-design configuration,
+            shared with batch filtering.
         u_measurement: Input at the measurement time for direct feedthrough.
             Defaults to u; pass separately when consecutive controls differ.
 
@@ -196,62 +220,6 @@ def kalman_step(
     return checked(result, throw, "Kalman step failed; inspect status")
 
 
-def kalman_gain(
-    sys: DiscLTI,
-    Q: Array,
-    R: Array,
-    *,
-    solver: DARE | None = None,
-    throw: bool = False,
-) -> KalmanGainResult:
-    """Design a steady-state Kalman filter gain for a discrete LTI system.
-
-    This is the estimator dual of discrete LQR. It solves the DARE for
-    `(A.T, C.T, Q, R)` and returns the measurement-update gain used
-    by `kalman_update()`.
-
-    Args:
-        sys: Discrete-time linear system.
-        Q: Process noise covariance. Shape: `(n, n)`.
-        R: Measurement noise covariance. Shape: `(p, p)`.
-        solver: Dual DARE solver configuration.
-        throw: Raise on failed Riccati design.
-
-    Returns:
-        [KalmanGainResult][contrax.types.KalmanGainResult]: A bundle with
-            update gain `K`, steady-state predicted covariance `P`, and
-            estimator error-dynamics poles.
-
-    Examples:
-        >>> import jax
-        >>> jax.config.update("jax_enable_x64", True)
-        >>> import jax.numpy as jnp
-        >>> import contrax as cx
-        >>> sys = cx.dss(
-        ...     jnp.array([[1.0, 0.1], [0.0, 1.0]]),
-        ...     jnp.array([[0.0], [0.1]]),
-        ...     jnp.eye(2),
-        ...     jnp.zeros((2, 1)),
-        ...     dt=0.1,
-        ... )
-        >>> design = cx.kalman_gain(sys, 0.001 * jnp.eye(2), 0.01 * jnp.eye(2))
-    """
-    if not isinstance(sys, DiscLTI):
-        raise TypeError("kalman_gain requires a discrete LTI system")
-    design = dare(sys.A.T, sys.C.T, Q, R, solver=solver, throw=throw)
-    P_pred = design.S
-    innovation_cov = sys.C @ P_pred @ sys.C.T + R
-    K = jnp.linalg.solve(innovation_cov.T, (P_pred @ sys.C.T).T).T
-    closed_loop = sys.A - sys.A @ K @ sys.C
-    return KalmanGainResult(
-        K=K,
-        P=P_pred,
-        closed_loop=closed_loop,
-        status=design.status,
-        residual_norm=design.residual_norm,
-    )
-
-
 def kalman(
     sys: DiscLTI,
     ys: Array,  # (T, p) measurement sequence
@@ -262,7 +230,7 @@ def kalman(
     P0: Array | None = None,
     us: Array | None = None,
     has_measurement: Array | None = None,
-    solver: Kalman | None = None,
+    solver: Kalman | SteadyStateKalman | InformationKalman | None = None,
     throw: bool = False,
 ) -> KalmanResult:
     """Run a linear discrete-time Kalman filter.
@@ -271,23 +239,29 @@ def kalman(
     [DiscLTI][contrax.systems.DiscLTI] system using the standard
     predict-update recursion expressed as a pure `lax.scan`.
 
-    Innovation gains use linear solves and posterior covariances use Joseph
-    form by default. Supports `jit`, `vmap` and differentiable covariance tuning.
-    All input arrays should share a floating dtype; filtering preserves it.
+    Innovation gains use Cholesky solves and posterior covariances use Joseph
+    form by default. Innovation covariances must be positive definite. Supports
+    `jit`, `vmap`, JVP and VJP, including differentiable covariance tuning.
+    Inputs are promoted to a common floating dtype, including cached design data.
 
     Args:
         sys: Discrete-time linear system.
         Q: Process noise covariance. Shape: `(n, n)`.
-        R: Measurement noise covariance. Shape: `(p, p)`.
+        R: Measurement covariance `(p, p)`, or a positive variance vector `(p,)`
+            with InformationKalman, which requires positive-definite priors.
         ys: Measurement sequence. Shape: `(T, p)`.
         x0: Optional initial mean. Shape: `(n,)`. Defaults to zeros.
-        P0: Optional initial covariance. Shape: `(n, n)`. Defaults to the
-            identity matrix.
+        P0: Initial predicted covariance `(n, n)`. Defaults to identity for
+            covariance/information filtering, or design.P with SteadyStateKalman.
+            A provided cached-mode P0 must match the design's predicted covariance.
         us: Controls for feedthrough at k and transition k to k+1. Shape:
             `(T, m)`. Defaults to zeros; the final transition is not returned.
         has_measurement: Whole-observation availability flags. Shape: `(T,)`.
             Missing observations may contain NaNs and return zero innovations.
-        solver: Joseph (default) or compact covariance-update configuration.
+        solver: Kalman (Joseph default, compact optional), InformationKalman for
+            diagonal R and state-size solves, or SteadyStateKalman(design).
+            Cached mode requires a fully observed stream and a gain/covariance
+            consistent with A, C, Q and R; mismatch reports invalid_problem.
 
         throw: Raise on numerical failure; otherwise inspect status.
 
@@ -312,11 +286,29 @@ def kalman(
     """
     if not isinstance(sys, DiscLTI):
         raise TypeError("kalman requires a discrete LTI system")
+    solver = Kalman() if solver is None else solver
+    if not isinstance(solver, (Kalman, SteadyStateKalman, InformationKalman)):
+        raise TypeError("solver must be Kalman, SteadyStateKalman or InformationKalman")
+    information = isinstance(solver, InformationKalman)
+    extra = ()
+    if isinstance(solver, SteadyStateKalman):
+        extra = (solver.design.K, solver.design.P)
+        P0 = solver.design.P if P0 is None else P0
     ys, Q, R, us, x0, P0, flags = prepare_filter(
-        sys, ys, Q, R, us, x0, P0, has_measurement
+        sys,
+        ys,
+        Q,
+        R,
+        us,
+        x0,
+        P0,
+        has_measurement,
+        diagonal_R=information,
+        extra_arrays=extra,
     )
-    if Q.shape != sys.A.shape or R.shape != (sys.C.shape[0], sys.C.shape[0]):
-        raise ValueError("Noise dimensions must match the model state and output")
+    if isinstance(solver, SteadyStateKalman):
+        result = cached_filter(sys, ys, Q, R, us, x0, P0, flags, solver)
+        return checked(result, throw, "Kalman filter failed; inspect status")
 
     # Update-then-predict: x0/P0 is the prior on x_0.
     # Each scan step updates with y_k first (using the current prior), then
@@ -342,6 +334,8 @@ def kalman(
         Ps=Ps,
         innovations=innovations,
         has_measurement=flags,
-        solver_status=input_status(P0, Q, R),
+        solver_status=jnp.where(
+            input_status(P0, Q) != 0, 2, noise_status(R, information)
+        ),
     )
     return checked(result, throw, "Kalman filter failed; inspect status")

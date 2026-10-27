@@ -10,6 +10,8 @@ from enum import IntEnum
 
 import equinox as eqx
 
+from contrax.types import KalmanGainResult
+
 
 class SolverStatus(IntEnum):
     """JAX-compatible integer status codes shared by numerical results."""
@@ -61,7 +63,17 @@ class Lyapunov(eqx.Module):
             raise ValueError("dense_limit must be a nonnegative integer")
 
 
-__all__ = ["Lyapunov", "DARE", "CARE", "Kalman", "EKF", "UKF", "SolverStatus"]
+__all__ = [
+    "Lyapunov",
+    "DARE",
+    "CARE",
+    "Kalman",
+    "SteadyStateKalman",
+    "InformationKalman",
+    "EKF",
+    "UKF",
+    "SolverStatus",
+]
 
 
 class DARE(eqx.Module):
@@ -115,6 +127,42 @@ class Kalman(eqx.Module):
     def __check_init__(self):
         if self.covariance_update not in ("joseph", "compact"):
             raise ValueError("covariance_update must be joseph or compact")
+
+
+class SteadyStateKalman(eqx.Module):
+    """Explicitly reuse a kalman_gain design for a fully observed LTI stream.
+
+    The design is differentiable data, never an implicit cache. Batch filtering
+    defaults P0 to design.P, the predicted covariance before the first update.
+    A different P0, a missing observation or an inconsistent model/noise pair
+    reports invalid_problem. Covariance-form Kalman supports those workflows.
+
+    Attributes:
+        design: KalmanGainResult returned by kalman_gain. Gain and predicted
+            covariance remain dynamic Equinox leaves for JVP/VJP and vmap.
+        rtol: Relative tolerance for gain/fixed-point and initialization checks.
+        atol: Absolute tolerance for those checks.
+    """
+
+    design: KalmanGainResult
+    rtol: float = eqx.field(static=True, default=1e-8)
+    atol: float = eqx.field(static=True, default=1e-10)
+
+    def __check_init__(self):
+        if not isinstance(self.design, KalmanGainResult):
+            raise TypeError("SteadyStateKalman requires a kalman_gain design")
+        Lyapunov(rtol=self.rtol, atol=self.atol)
+
+
+class InformationKalman(eqx.Module):
+    """Whitened state-space Kalman update for diagonal observation noise.
+
+    Pass R as a positive variance vector of shape (p,). Prior whitening and
+    state-size Cholesky solves avoid a prior inverse and p-by-p innovation
+    factorization. Useful when observations outnumber states. Predicted
+    covariances must be positive definite. Controls and missing observations
+    follow covariance-form Kalman conventions. No covariance repair is applied.
+    """
 
 
 class EKF(eqx.Module):

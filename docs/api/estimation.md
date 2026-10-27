@@ -309,11 +309,56 @@ Scalar and matrix penalty weights both represent cost/precision weighting:
 covariance. For a covariance-weighted residual, use an explicit factor solve
 before applying a scalar penalty.
 
+## Explicit Linear Filter Algorithms
+
+Ordinary `kalman` uses innovation Cholesky solves and Joseph covariance updates.
+The innovation covariance must be positive definite. Choose another algorithm
+explicitly when its assumptions fit the workflow:
+
+```python
+import jax
+jax.config.update("jax_enable_x64", True)
+import jax.numpy as jnp
+import contrax as cx
+
+sys = cx.dss([[0.9]], [[1.0]], [[1.0]], [[0.0]], dt=0.1)
+Q, R = 0.01 * jnp.eye(1), 0.1 * jnp.eye(1)
+ys = jnp.zeros((20, 1))
+design = cx.kalman_gain(sys, Q, R)
+steady = cx.kalman(sys, ys, Q=Q, R=R,
+                   solver=cx.solvers.SteadyStateKalman(design))
+information = cx.kalman(sys, ys, Q=Q, R=jnp.diag(R),
+                       solver=cx.solvers.InformationKalman())
+assert steady.successful & information.successful
+```
+
+`design.P` is the predicted covariance **before** the first measurement update.
+Steady-state mode uses it as the default `P0` and computes the Joseph posterior
+covariance once. It validates the gain, Riccati fixed point, initialization and
+estimator stability. A mismatched design or missing observation reports
+`invalid_problem`, with optional checked failure through `throw=True`.
+No design is cached implicitly. To differentiate a loss with respect to model
+or noise parameters, construct `kalman_gain` inside that differentiable workflow
+and pass its result to the solver. Holding a design fixed while changing its
+model/noise data is an inconsistent cached problem.
+
+Information mode takes a positive variance vector `(p,)` and factors matrices
+in state dimension after whitening the prior. It forms no prior inverse and
+no `p`-by-`p` innovation matrix. This can reduce work and storage for wide
+observation maps and avoid loss of small diagonal noise in a dense innovation
+matrix. It requires positive-definite priors at observed steps; covariance-form
+filtering also supports semidefinite priors with nonsingular innovations.
+Information mode retains the usual controls, whole-observation masks, zero/identity
+initialization defaults and float32/float64 precision. Numerical failure is
+reported rather than repaired with jitter. Both options are accepted by the
+linear online update and combined-step helpers as well as batch filtering.
+
 ## One-Step Helper Signatures
 
 All batch filters take `(model, ys, *, Q, R, us=None, x0=None, P0=None)`.
 Initial means default to zero and covariances to identity; both describe the
-prior at the first observation. Omitted controls are zero vectors using the
+prior at the first observation. Explicit steady-state mode instead defaults
+the covariance to its design's predicted covariance. Omitted controls use the
 model's input dimension. Set `input_dim` on controlled nonlinear models or
 provide `us`. Sampled FOH models accept `(T, 2, m)` endpoint pairs.
 

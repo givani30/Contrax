@@ -42,7 +42,7 @@ def checked(result, throw, message):
     return eqx.error_if(result, ~result.successful, message) if throw else result
 
 
-def prepare_state(x, P, noise, *, measurement=None):
+def prepare_state(x, P, noise, *, measurement=None, diagonal_noise=False):
     arrays = tuple(jnp.asarray(a) for a in (x, P, noise))
     if any(jnp.iscomplexobj(a) for a in arrays):
         raise ValueError("Filters require real arrays")
@@ -53,7 +53,8 @@ def prepare_state(x, P, noise, *, measurement=None):
     if measurement is not None and len(jnp.shape(measurement)) != 1:
         raise ValueError("y must have shape (p,)")
     dim = x.shape[0] if measurement is None else jnp.shape(measurement)[0]
-    if noise.shape != (dim, dim):
+    expected = (dim,) if diagonal_noise else (dim, dim)
+    if noise.shape != expected:
         raise ValueError(
             "Noise covariance dimensions must match the state or observation"
         )

@@ -15,11 +15,11 @@ from contrax._estimation_diagnostics import (  # noqa: F401
 )
 from contrax._kalman import (  # noqa: F401
     kalman,
-    kalman_gain,
     kalman_predict,
     kalman_step,
     kalman_update,
 )
+from contrax._kalman_gain import kalman_gain  # noqa: F401
 from contrax._mhe import (  # noqa: F401
     mhe,
     mhe_objective,

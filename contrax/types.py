@@ -170,6 +170,7 @@ class KalmanGainResult(eqx.Module):
         closed_loop: Predicted-error transition matrix A(I-KC). Shape: `(n, n)`.
         status: Integer Riccati design status. Shape: scalar.
         residual_norm: Maximum absolute dual Riccati residual.
+        num_steps: Iterations used by the dual Riccati design.
         successful: Whether the validated Riccati design succeeded.
     """
 
@@ -178,6 +179,7 @@ class KalmanGainResult(eqx.Module):
     closed_loop: Array
     status: Array
     residual_norm: Array
+    num_steps: Array
 
     @property
     def poles(self) -> Array:

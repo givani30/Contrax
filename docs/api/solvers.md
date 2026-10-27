@@ -33,6 +33,21 @@ compact form requires `covariance_update="compact"`. `EKF(num_iter=3)` enables
 iterated measurement linearization in online and batch estimators. Filtering
 preserves input precision and does not require float64 mode.
 
+`SteadyStateKalman(design)` explicitly reuses a `kalman_gain` result. Its gain
+and covariance are differentiable data. The initial predicted covariance
+defaults to `design.P`; a supplied `P0` must match it. The batch checks the
+fixed-point equations for the supplied `A`, `C`, `Q`, `R` and the estimator's
+stability. An inconsistent design or a missing observation reports
+`invalid_problem`. Use covariance-form filtering for varying covariances or
+missing observations. Design creation still requires float64 mode.
+
+`InformationKalman()` accepts diagonal observation variances as `R.shape=(p,)`.
+It whitens the prior and observations, then factors an `n`-by-`n` matrix. It
+avoids forming the prior inverse or a dense innovation covariance, and is useful
+when observations outnumber states. Predicted covariances at observed steps
+must be positive definite and all variances positive. Controls, masks,
+initialization defaults and differentiation follow ordinary Kalman filtering.
+
 `UKF(alpha=1, beta=2, kappa=0)` configures the scaled unscented transform.
 Sigma-point covariances and innovation covariances must be positive definite;
 no diagonal jitter is added. Missing observations skip the entire measurement

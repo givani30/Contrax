@@ -15,14 +15,34 @@ def zero_input(model, dtype):
     return jnp.zeros(shape, dtype=dtype)
 
 
-def prepare_filter(model, ys, Q, R, us, x0, P0, has_measurement):
+def prepare_filter(
+    model,
+    ys,
+    Q,
+    R,
+    us,
+    x0,
+    P0,
+    has_measurement,
+    *,
+    diagonal_R=False,
+    extra_arrays=(),
+):
     ys, Q, R = (jnp.asarray(a) for a in (ys, Q, R))
     if Q.ndim != 2 or Q.shape[0] != Q.shape[1] or Q.shape[0] == 0:
         raise ValueError("Q must have nonempty shape (n, n)")
     n = Q.shape[0]
-    if ys.ndim != 2 or R.shape != (ys.shape[1], ys.shape[1]):
-        raise ValueError("ys and R must have shapes (T, p) and (p, p)")
+    if ys.ndim != 2:
+        raise ValueError("ys must have shape (T, p)")
+    expected_R = (ys.shape[1],) if diagonal_R else (ys.shape[1], ys.shape[1])
+    if R.shape != expected_R:
+        raise ValueError(
+            "R must be a variance vector (p,)"
+            if diagonal_R
+            else "R must have shape (p, p)"
+        )
     arrays = [jnp.asarray(a) for a in (ys, Q, R, us, x0, P0) if a is not None]
+    arrays.extend(extra_arrays)
     if hasattr(model, "A"):
         arrays.extend((model.A, model.B, model.C, model.D))
     if any(jnp.iscomplexobj(a) for a in arrays):
