@@ -56,8 +56,9 @@ $$
 ```
 
 This workflow is part of the public API and is backed by explicit residual and
-stability checks in eager mode. The main caveat is comparative maturity:
-`care()` is less benchmarked than `dare()`, but it is a supported solver path.
+stability checks in eager and compiled execution. Inspect `result.successful`
+before using a design; `throw=True` requests checked failure. Closely spaced
+Hamiltonian subspaces can limit accuracy even after Newton refinement.
 
 That caveat matters for the docs structure too: continuous LQR is documented as
 a real supported workflow, but it is not presented as the most battle-tested

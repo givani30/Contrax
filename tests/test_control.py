@@ -493,8 +493,10 @@ def test_care_raises_when_hamiltonian_has_no_stable_subspace_split():
     Q = jnp.eye(1)
     R = jnp.eye(1)
 
-    with pytest.raises(ValueError, match="stabilizing Hamiltonian subspace"):
-        cx.care(A, B, Q, R)
+    assert not cx.care(A, B, Q, R).successful
+    assert not jax.jit(cx.care)(A, B, Q, R).successful
+    with pytest.raises(Exception, match="Riccati solve failed"):
+        cx.care(A, B, Q, R, throw=True)
 
 
 # -- gradient tests ------------------------------------------------------------

@@ -175,18 +175,26 @@ $$
 
 with $\bar{K}$ partitioned over the physical and integral states.
 
-## Solver Maturity
+## Solver Selection and Failure Handling
 
-Contrax is explicit about solver maturity:
+Ordinary calls use `cx.lqr(sys, Q, R)`. Pass `solver=cx.solvers.DARE(...)`
+for discrete systems or `solver=cx.solvers.CARE(...)` for continuous systems;
+`lqi` passes the same configuration to the augmented design. `kalman_gain`
+accepts the DARE configuration for its dual equation.
 
-- `dare()` is the most mature Riccati path
-- `care()` is supported and validated, but less benchmarked than `dare()`
-- `place()` is suitable as a design-time helper, not as a hardened large-scale
-  assignment solver
+- DARE uses structured doubling with scale-aware stopping.
+- CARE uses Hamiltonian stable-subspace extraction and accepts Newton
+  corrections only when they reduce the residual and retain stability.
+- Both validate cost definiteness, equation residuals and closed-loop stability
+  in JAX. Inspect `result.successful`, `result.status`, `result.residual_norm`
+  and `result.num_steps`. Numerical failure returns diagnostics by default;
+  `throw=True` raises in eager or compiled execution.
+- Shape errors and incompatible solver objects raise immediately.
 
-If the numerical context matters to your workflow, read
-[Riccati solvers](../theory/riccati-solvers.md) before treating all paths as
-equally mature.
+Nearly inseparable Hamiltonian subspaces can make CARE inaccurate. Newton
+refinement cannot create a stabilizing subspace when one is absent. Read
+[Riccati solvers](../theory/riccati-solvers.md) for assumptions and conditioning.
+Pole placement retains its separate design-time contract.
 
 ## Transform Behavior
 
@@ -197,8 +205,8 @@ The key contracts are:
 
 - `lqr()` dispatches on [`DiscLTI`][contrax.systems.DiscLTI] vs
   [`ContLTI`][contrax.systems.ContLTI] outside traced runtime values
-- the Riccati paths use custom or implicit VJPs rather than blindly unrolling
-  the forward solve in reverse mode
+- the Riccati paths support implicit JVPs and VJPs rather than differentiating
+  through the forward iteration or Hamiltonian eigenvectors
 - `state_feedback()` is just state-space algebra on the model matrices
 
 That makes controller design inside a JIT-compiled objective a first-class use

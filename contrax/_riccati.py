@@ -1,14 +1,15 @@
-"""contrax._riccati — DARE and CARE solvers with custom VJPs."""
+"""contrax._riccati — DARE and CARE solvers with implicit derivatives."""
 
 import functools
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-import numpy as np
 from jax import Array
-from jax import core as jax_core
 
+from contrax._lyapunov import solve_lyapunov
 from contrax._precision import require_x64
+from contrax.solvers import CARE, DARE, Lyapunov, SolverStatus
 from contrax.types import LQRResult
 
 
@@ -70,7 +71,7 @@ def _dare_structured_doubling(
 
 
 def _dare_structured_doubling_until_converged(
-    A: Array, B: Array, Q: Array, R: Array, max_iter: int, tol: float
+    A: Array, B: Array, Q: Array, R: Array, max_iter: int, tol: float, atol: float = 0.0
 ) -> tuple[Array, Array]:
     """Structured doubling with data-dependent stopping.
 
@@ -86,7 +87,7 @@ def _dare_structured_doubling_until_converged(
 
     def cond(carry):
         iteration, _, _, _, delta = carry
-        return (iteration < max_iter) & (delta > tol)
+        return (iteration < max_iter) & (delta > 1.0)
 
     def step(carry):
         iteration, A_k, G_k, H_k, _ = carry
@@ -102,7 +103,9 @@ def _dare_structured_doubling_until_converged(
         H_next = H_k + A_k.T @ solve_HA
         G_next = _symmetrize(G_next)
         H_next = _symmetrize(H_next)
-        delta = jnp.max(jnp.abs(H_next - H_k))
+        delta = jnp.max(jnp.abs(H_next - H_k)) / (
+            atol + tol * jnp.maximum(jnp.max(jnp.abs(H_next)), 1.0)
+        )
         return iteration + 1, A_next, G_next, H_next, delta
 
     iteration, _, _, S, _ = jax.lax.while_loop(
@@ -124,76 +127,107 @@ def _care_residual(S: Array, A: Array, B: Array, Q: Array, R: Array) -> Array:
 
 
 def _solve_adjoint_discrete_lyapunov(A_cl: Array, G: Array) -> Array:
-    """Solve X - A_cl X A_cl.T = G for dense small systems."""
-    n = A_cl.shape[0]
-    basis = jnp.eye(n * n, dtype=A_cl.dtype).reshape(n * n, n, n)
-
-    def op(X):
-        return X - A_cl @ X @ A_cl.T
-
-    matrix = jax.vmap(lambda X: op(X).reshape(-1))(basis).T
-    X = jnp.linalg.solve(matrix, G.reshape(-1)).reshape(n, n)
-    return _symmetrize(X)
+    """Solve the Riccati adjoint with bounded automatic dense fallback."""
+    X, (_, status) = solve_lyapunov(
+        A_cl, _symmetrize(G), continuous=False, solver=Lyapunov()
+    )
+    return jnp.where(status == 0, _symmetrize(X), jnp.full_like(X, jnp.nan))
 
 
 def _solve_adjoint_continuous_lyapunov(A_cl: Array, G: Array) -> Array:
-    """Solve A_cl X + X A_cl.T = G for dense small systems.
-
-    This builds the dense Kronecker-form linear system explicitly, so the
-    forward cost scales like O(n^6) in the naive dense solve. That is fine for
-    the current small-system adjoint use case, but it is not intended as a
-    large-state hot path.
-    """
-    n = A_cl.shape[0]
-    basis = jnp.eye(n * n, dtype=A_cl.dtype).reshape(n * n, n, n)
-
-    def op(X):
-        return A_cl @ X + X @ A_cl.T
-
-    matrix = jax.vmap(lambda X: op(X).reshape(-1))(basis).T
-    X = jnp.linalg.solve(matrix, G.reshape(-1)).reshape(n, n)
-    return _symmetrize(X)
+    """Solve A_cl X + X A_cl.T = G through the shared equation kernel."""
+    X, (_, status) = solve_lyapunov(
+        A_cl, -_symmetrize(G), continuous=True, solver=Lyapunov()
+    )
+    return jnp.where(status == 0, _symmetrize(X), jnp.full_like(X, jnp.nan))
 
 
-# ── DARE custom VJP ────────────────────────────────────────────────────────
-# Reference: Implicit Function Theorem approach from DiLQR (ICML 2025) and
-# trajax (Google, github.com/google/trajax).
+# Reference: implicit differentiation of the Riccati residual (DiLQR, 2025).
+# The JVP solves its linearized Lyapunov equation; transposition gives the VJP.
+@functools.partial(jax.custom_jvp, nondiff_argnums=(4, 5, 6))
+def _dare_solve_with_info(A, B, Q, R, max_iter, rtol, atol):
+    return _dare_structured_doubling_until_converged(A, B, Q, R, max_iter, rtol, atol)
 
 
-@functools.partial(jax.custom_vjp, nondiff_argnums=(4, 5))
-def _dare_structured_doubling_solve(
-    A: Array, B: Array, Q: Array, R: Array, max_iter: int, tol: float
-) -> Array:
-    S, _ = _dare_structured_doubling_until_converged(A, B, Q, R, max_iter, tol)
-    return S
-
-
-def _dare_structured_doubling_solve_fwd(
-    A: Array, B: Array, Q: Array, R: Array, max_iter: int, tol: float
-):
-    S = _dare_structured_doubling_solve(A, B, Q, R, max_iter, tol)
-    return S, (S, A, B, Q, R)
-
-
-def _dare_structured_doubling_solve_bwd(max_iter: int, tol: float, res, g: Array):
-    del max_iter, tol
-    S, A, B, Q, R = res
+@_dare_solve_with_info.defjvp
+def _dare_jvp(max_iter, rtol, atol, primals, tangents):
+    A, B, Q, R = primals
+    S, steps = _dare_solve_with_info(*primals, max_iter, rtol, atol)
     K = _lqr_gain(A, B, S, R)
     A_cl = A - B @ K
-    adjoint = _solve_adjoint_discrete_lyapunov(A_cl, g)
-
-    def residual_params(A, B, Q, R):
-        return _dare_residual(S, A, B, Q, R)
-
-    _, pullback = jax.vjp(residual_params, A, B, Q, R)
-    dA, dB, dQ, dR = pullback(adjoint)
-    return (-dA, -dB, -dQ, -dR)
+    _, forcing = jax.jvp(
+        lambda a, b, q, r: _dare_residual(S, a, b, q, r), primals, tangents
+    )
+    dS, _ = solve_lyapunov(A_cl.T, -forcing, continuous=False, solver=Lyapunov())
+    dS = _symmetrize(dS)
+    return (S, steps), (dS, jnp.zeros(steps.shape, dtype=jax.dtypes.float0))
 
 
-_dare_structured_doubling_solve.defvjp(
-    _dare_structured_doubling_solve_fwd,
-    _dare_structured_doubling_solve_bwd,
-)
+def _dare_structured_doubling_solve(A, B, Q, R, max_iter, tol):
+    return _dare_solve_with_info(A, B, Q, R, max_iter, tol, 0.0)[0]
+
+
+def _validate_matrices(A, B, Q, R):
+    A, B, Q, R = (jnp.asarray(x) for x in (A, B, Q, R))
+    if A.ndim != 2 or A.shape[0] != A.shape[1] or A.shape[0] == 0:
+        raise ValueError("A must be a nonempty square matrix")
+    n = A.shape[0]
+    if B.ndim != 2 or B.shape[0] != n or B.shape[1] == 0:
+        raise ValueError("B must have shape (n, m), with m > 0")
+    if Q.shape != (n, n) or R.shape != (B.shape[1], B.shape[1]):
+        raise ValueError("Q and R must have shapes (n, n) and (m, m)")
+    if any(jnp.iscomplexobj(x) for x in (A, B, Q, R)):
+        raise ValueError("Riccati solvers require real matrices")
+    dtype = jnp.result_type(A, B, Q, R, 1.0)
+    return tuple(x.astype(dtype) for x in (A, B, Q, R))
+
+
+def _result(A, B, Q, R, S, steps, solver, *, continuous, throw):
+    K = jnp.linalg.solve(R, B.T @ S) if continuous else _lqr_gain(A, B, S, R)
+    poles = jnp.linalg.eigvals(A - B @ K)
+    if continuous:
+        terms = (Q, A.T @ S, S @ A, -S @ B @ K)
+    else:
+        terms = (S, -Q, -A.T @ S @ A, A.T @ S @ B @ K)
+    residual_norm = jnp.max(jnp.abs(sum(terms)))
+    scale = sum(jnp.max(jnp.abs(term)) for term in terms)
+    symmetric = (
+        jnp.max(jnp.abs(Q - Q.T)) <= solver.atol + solver.rtol * jnp.max(jnp.abs(Q))
+    ) & (jnp.max(jnp.abs(R - R.T)) <= solver.atol + solver.rtol * jnp.max(jnp.abs(R)))
+    valid = (
+        symmetric
+        & (jnp.min(jnp.linalg.eigvalsh(_symmetrize(Q))) >= -solver.atol)
+        & (jnp.min(jnp.linalg.eigvalsh(_symmetrize(R))) > 0)
+    )
+    stable = jnp.all(jnp.real(poles) < 0 if continuous else jnp.abs(poles) < 1)
+    finite = jnp.all(jnp.isfinite(S)) & jnp.all(jnp.isfinite(K)) & jnp.isfinite(scale)
+    good = finite & stable & (residual_norm <= solver.atol + solver.rtol * scale)
+    exhausted = False if continuous else steps >= solver.max_steps
+    status = jnp.where(
+        ~valid,
+        int(SolverStatus.invalid_problem),
+        jnp.where(
+            good,
+            int(SolverStatus.successful),
+            jnp.where(
+                finite & exhausted,
+                int(SolverStatus.max_steps_reached),
+                int(SolverStatus.numerical_failure),
+            ),
+        ),
+    )
+    if throw:
+        S = eqx.error_if(
+            S, status != 0, "Riccati solve failed; inspect status/residual"
+        )
+    return LQRResult(
+        K=K,
+        S=S,
+        poles=poles,
+        residual_norm=residual_norm,
+        status=status,
+        num_steps=steps,
+    )
 
 
 def dare(
@@ -201,46 +235,46 @@ def dare(
     B: Array,
     Q: Array,
     R: Array,
-    max_iter: int = 64,
-    tol: float = 1e-10,
+    *,
+    solver: DARE | None = None,
+    throw: bool = False,
 ) -> LQRResult:
-    """Solve the discrete algebraic Riccati equation.
+    """Solve the discrete algebraic Riccati equation and design a stabilizing gain.
 
-    Computes the stabilizing Riccati solution and corresponding infinite-horizon
-    discrete LQR gain for the matrix tuple `(A, B, Q, R)`.
-
-    This is currently the strongest Riccati solver path in Contrax. The
-    forward solve uses structured doubling with tolerance-based stopping, and
-    gradients are provided through a custom VJP built from implicit
-    differentiation of the Riccati residual.
+    Uses structured doubling, scale-aware stopping and residual validation.
+    Requires real matrices, symmetric positive-semidefinite Q, positive-definite
+    R and float64 mode. Stabilizability and detectability are needed for the
+    stabilizing solution. Both JVP and VJP differentiate the equation implicitly
+    through a residual-validated Lyapunov solve, without unrolling iterations.
+    Supports `jit` and `vmap`; numerical failures have the same status in both.
 
     Args:
-        A: Discrete-time state transition matrix. Shape: `(n, n)`.
-        B: Discrete-time input matrix. Shape: `(n, m)`.
+        A: State transition matrix. Shape: `(n, n)`.
+        B: Input matrix. Shape: `(n, m)`.
         Q: State cost matrix. Shape: `(n, n)`.
         R: Input cost matrix. Shape: `(m, m)`.
-        max_iter: Maximum structured-doubling iterations.
-        tol: Forward stopping tolerance on Riccati iterate changes.
+        solver: Structured doubling tolerances and iteration limit.
+        throw: Raise on failed validation instead of returning failure diagnostics.
 
     Returns:
-        [LQRResult][contrax.types.LQRResult]: A bundle containing the optimal
-            feedback gain `K`, Riccati solution `S`, and closed-loop poles
-            `poles`.
+        LQRResult: Gain K, Riccati solution S, poles, status and diagnostics.
 
     Examples:
-        >>> import jax.numpy as jnp
         >>> import contrax as cx
-        >>> A = jnp.array([[1.0, 0.05], [0.0, 1.0]])
-        >>> B = jnp.array([[0.0], [0.05]])
-        >>> result = cx.dare(A, B, jnp.eye(2), jnp.array([[1.0]]))
+        >>> import jax.numpy as jnp
+        >>> result = cx.dare(jnp.eye(2), jnp.eye(2), jnp.eye(2), jnp.eye(2))
+        >>> result.successful
+        Array(True, dtype=bool)
     """
     require_x64("dare")
-    S = _dare_structured_doubling_solve(A, B, Q, R, max_iter, tol)
-    K = _lqr_gain(A, B, S, _symmetrize(R))
-    A_cl = A - B @ K
-    poles = jnp.linalg.eigvals(A_cl)
-    residual_norm = jnp.max(jnp.abs(_dare_residual(S, A, B, Q, R)))
-    return LQRResult(K=K, S=S, poles=poles, residual_norm=residual_norm)
+    solver = DARE() if solver is None else solver
+    if not isinstance(solver, DARE):
+        raise TypeError("dare solver must be contrax.solvers.DARE")
+    A, B, Q, R = _validate_matrices(A, B, Q, R)
+    S, steps = _dare_solve_with_info(
+        A, B, Q, R, solver.max_steps, solver.rtol, solver.atol
+    )
+    return _result(A, B, Q, R, S, steps, solver, continuous=False, throw=throw)
 
 
 # ── CARE via Hamiltonian eigendecomposition ───────────────────────────────
@@ -272,118 +306,99 @@ def _care_hamiltonian_solve(A: Array, B: Array, Q: Array, R: Array) -> Array:
     return _symmetrize(S)
 
 
-# ── CARE custom VJP ────────────────────────────────────────────────────────
-# Reference: Implicit Function Theorem approach from DiLQR (ICML 2025) and
-# trajax (Google, github.com/google/trajax).
+# Reference: Kleinman (1968), "On an iterative technique for Riccati equation
+# computations", IEEE TAC. Newton corrections solve the residual Lyapunov equation.
+def _care_refined(A, B, Q, R, refinement_steps):
+    S = _care_hamiltonian_solve(A, B, Q, R)
+
+    def step(carry, _):
+        S, accepted = carry
+        K = jnp.linalg.solve(R, B.T @ S)
+        residual = _care_residual(S, A, B, Q, R)
+        correction, (_, status) = solve_lyapunov(
+            (A - B @ K).T, residual, continuous=True, solver=Lyapunov()
+        )
+        candidate = _symmetrize(S + correction)
+        candidate_K = jnp.linalg.solve(R, B.T @ candidate)
+        stable = jnp.all(jnp.real(jnp.linalg.eigvals(A - B @ candidate_K)) < 0)
+        improves = jnp.linalg.norm(
+            _care_residual(candidate, A, B, Q, R)
+        ) < jnp.linalg.norm(residual)
+        accept = (status == 0) & stable & improves & jnp.all(jnp.isfinite(candidate))
+        return (jnp.where(accept, candidate, S), accepted + accept.astype(int)), None
+
+    (S, accepted), _ = jax.lax.scan(
+        step, (S, jnp.asarray(0)), None, length=refinement_steps
+    )
+    return S, accepted
 
 
-@jax.custom_vjp
-def _care_solve(A: Array, B: Array, Q: Array, R: Array) -> Array:
-    return _care_hamiltonian_solve(A, B, Q, R)
+@functools.partial(jax.custom_jvp, nondiff_argnums=(4,))
+def _care_with_info(A, B, Q, R, refinement_steps):
+    return _care_refined(A, B, Q, R, refinement_steps)
 
 
-def _care_solve_fwd(A: Array, B: Array, Q: Array, R: Array):
-    S = _care_solve(A, B, Q, R)
-    return S, (S, A, B, Q, R)
-
-
-def _care_solve_bwd(res, g: Array):
-    S, A, B, Q, R = res
+@_care_with_info.defjvp
+def _care_jvp(refinement_steps, primals, tangents):
+    A, B, Q, R = primals
+    S, steps = _care_with_info(*primals, refinement_steps)
     K = jnp.linalg.solve(R, B.T @ S)
-    A_cl = A - B @ K
-    adjoint = _solve_adjoint_continuous_lyapunov(A_cl, g)
-
-    def residual_params(A, B, Q, R):
-        return _care_residual(S, A, B, Q, R)
-
-    _, pullback = jax.vjp(residual_params, A, B, Q, R)
-    dA, dB, dQ, dR = pullback(adjoint)
-    return (-dA, -dB, -dQ, -dR)
+    _, forcing = jax.jvp(
+        lambda a, b, q, r: _care_residual(S, a, b, q, r), primals, tangents
+    )
+    dS, _ = solve_lyapunov((A - B @ K).T, forcing, continuous=True, solver=Lyapunov())
+    dS = _symmetrize(dS)
+    return (S, steps), (dS, jnp.zeros(steps.shape, dtype=jax.dtypes.float0))
 
 
-_care_solve.defvjp(_care_solve_fwd, _care_solve_bwd)
+def _care_solve(A, B, Q, R):
+    return _care_with_info(A, B, Q, R, 3)[0]
 
 
-def _is_tracing(*arrays: Array) -> bool:
-    return any(isinstance(arr, jax_core.Tracer) for arr in arrays)
-
-
-def _validate_care_solution(
+def care(
     A: Array,
     B: Array,
     Q: Array,
     R: Array,
-    S: Array,
-    poles: Array,
-) -> None:
-    """Run eager-only CARE diagnostics on concrete arrays."""
-    R_inv_BT = jnp.linalg.solve(_symmetrize(R), B.T)
-    hamiltonian = jnp.block(
-        [
-            [A, -(B @ R_inv_BT)],
-            [-_symmetrize(Q), -A.T],
-        ]
-    )
-    eigenvalues = np.linalg.eigvals(np.asarray(hamiltonian))
-    stable_count = int(np.sum(np.real(eigenvalues) < 0.0))
-    n = A.shape[0]
-    if stable_count != n:
-        raise ValueError(
-            "care() could not isolate a stabilizing Hamiltonian subspace: "
-            f"expected {n} eigenvalues with negative real part, got "
-            f"{stable_count}. This usually indicates an ill-conditioned or "
-            "non-stabilizing CARE instance."
-        )
+    *,
+    solver: CARE | None = None,
+    throw: bool = False,
+) -> LQRResult:
+    """Solve the continuous algebraic Riccati equation and design a stabilizing gain.
 
-    residual_norm = float(jnp.max(jnp.abs(_care_residual(S, A, B, Q, R))))
-    if residual_norm > 1e-7:
-        raise ValueError(
-            "care() produced a Riccati matrix with an unexpectedly large "
-            f"residual ({residual_norm:.3e})."
-        )
+    A Hamiltonian stable-subspace candidate is refined by residual-decreasing,
+    stabilizing Newton corrections. The eigenvector solve is sensitive to poor
+    stable-subspace separation; an inaccurate candidate is reported as failure.
+    Requires float64 mode, real matrices, symmetric positive-semidefinite Q and
+    positive-definite R. Stabilizability and detectability are needed for the
+    stabilizing solution. No global precision settings are changed.
 
-    if not np.all(np.isfinite(np.asarray(S))):
-        raise ValueError("care() produced a non-finite Riccati matrix.")
-
-    if not np.all(np.real(np.asarray(poles)) < 0.0):
-        raise ValueError("care() did not produce a stabilizing closed-loop system.")
-
-
-def care(A: Array, B: Array, Q: Array, R: Array) -> LQRResult:
-    """Solve the continuous algebraic Riccati equation.
-
-    Computes the stabilizing Riccati solution and corresponding continuous-time
-    LQR gain for the matrix tuple `(A, B, Q, R)`.
-
-    The forward solve uses a Hamiltonian stable-subspace construction with
-    `jnp.linalg.eig`, and gradients are provided through an
-    implicit-differentiation custom VJP. This is now a real baseline
-    continuous-time solver, but it is not yet as hardened as `dare()`.
+    Supports `jit`, `vmap`, JVP and VJP. Derivatives solve the implicit equation,
+    without differentiating through eigenvectors or refinement iterations.
+    Residual and closed-loop stability validation run in JAX in every mode.
 
     Args:
-        A: Continuous-time state matrix. Shape: `(n, n)`.
-        B: Continuous-time input matrix. Shape: `(n, m)`.
+        A: State matrix. Shape: `(n, n)`.
+        B: Input matrix. Shape: `(n, m)`.
         Q: State cost matrix. Shape: `(n, n)`.
         R: Input cost matrix. Shape: `(m, m)`.
+        solver: Hamiltonian candidate refinement and residual tolerances.
+        throw: Raise on failed validation instead of returning failure diagnostics.
 
     Returns:
-        [LQRResult][contrax.types.LQRResult]: A bundle containing the optimal
-            feedback gain `K`, Riccati solution `S`, and closed-loop poles
-            `poles`.
+        LQRResult: Gain K, Riccati solution S, poles, status and diagnostics.
 
     Examples:
-        >>> import jax.numpy as jnp
         >>> import contrax as cx
-        >>> A = jnp.array([[0.0, 1.0], [0.0, 0.0]])
-        >>> B = jnp.array([[0.0], [1.0]])
-        >>> result = cx.care(A, B, jnp.eye(2), jnp.array([[1.0]]))
+        >>> import jax.numpy as jnp
+        >>> result = cx.care(-jnp.eye(2), jnp.eye(2), jnp.eye(2), jnp.eye(2))
+        >>> result.successful
+        Array(True, dtype=bool)
     """
     require_x64("care")
-    S = _care_solve(A, B, Q, R)
-    K = jnp.linalg.solve(_symmetrize(R), B.T @ S)
-    A_cl = A - B @ K
-    poles = jnp.linalg.eigvals(A_cl)
-    residual_norm = jnp.max(jnp.abs(_care_residual(S, A, B, Q, R)))
-    if not _is_tracing(A, B, Q, R, S, poles):
-        _validate_care_solution(A, B, Q, R, S, poles)
-    return LQRResult(K=K, S=S, poles=poles, residual_norm=residual_norm)
+    solver = CARE() if solver is None else solver
+    if not isinstance(solver, CARE):
+        raise TypeError("care solver must be contrax.solvers.CARE")
+    A, B, Q, R = _validate_matrices(A, B, Q, R)
+    S, steps = _care_with_info(A, B, Q, R, solver.refinement_steps)
+    return _result(A, B, Q, R, S, steps, solver, continuous=True, throw=throw)

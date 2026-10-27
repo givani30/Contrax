@@ -70,6 +70,25 @@ Contrax uses the update-first batch convention for `kalman()`, `ekf()`, and
 `ukf()`: `(x0, P0)` is the prior on `x_0`, and the first scan step updates
 with `y_0`.
 
+Linear filtering accepts `us=(T, m)` for both feedthrough at k and the transition
+from k to k+1. EKF uses the same convention. `kalman` and `ekf` accept a `(T,)`
+`has_measurement` mask; missing observations may contain NaNs. Skipped updates
+leave the prior unchanged and return zero innovations. The final predicted
+transition is not included in `KalmanResult`.
+
+Joseph covariance updates are the default for linear filtering and EKF:
+
+$$
+P^+ = (I-KH)P^-(I-KH)^\top + K R K^\top.
+$$
+
+Here H is C for the linear filter. Select compact form explicitly with
+`cx.solvers.Kalman(covariance_update="compact")` or
+`cx.solvers.EKF(covariance_update="compact")`. No eigenvalue clipping or
+automatic precision changes are applied. Pass consistent dtypes for model,
+noise, initial conditions and observations; float32 workflows retain float32.
+For a controlled linear smoother, pass the forward controls to `rts(..., us=us)`.
+
 ## Estimator Equations
 
 Contrax uses an update-first batch convention: the pair `(x0, P0)` is the
@@ -146,9 +165,9 @@ $$
 P_{k+1}^- = F_k P_k^+ F_k^\top + Q
 $$
 
-If you use the one-step `ekf_update(..., num_iter>1)` helper, the measurement
-map is relinearized around the current update iterate while keeping the
-prediction covariance fixed.
+Pass `solver=cx.solvers.EKF(num_iter=3)` to `ekf`, `ekf_update` or `ekf_step`
+to relinearize around each update iterate while keeping the prediction
+covariance fixed. All three use the same configuration.
 
 ### Unscented Kalman Filter
 
@@ -283,6 +302,12 @@ x, P, innov = cx.kalman_step(sys, x, P, y, Q_noise, R_noise, u=None)
 
 `has_measurement=False` can be passed to all step helpers to skip the update
 (useful for streams with missing samples inside `jax.lax.scan`).
+
+For an online predict-update step, `u` belongs to the transition from the
+previous posterior. Pass `u_measurement=` separately when the input used by
+the observation has changed. For time-dependent EKF models, `t` is the
+transition start time and `measurement_time` is the observation time; the
+default observation time adds the model's sample period when available.
 
 ## Model Inputs
 

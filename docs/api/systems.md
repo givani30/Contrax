@@ -1,5 +1,11 @@
 # Systems
 
+`ss` and `dss` promote their matrix inputs to a common floating dtype, preserving
+explicit float32 matrices even when float64 mode is enabled. Integer inputs
+become floating arrays. `dss` stores its scalar sample time in the resulting
+real matrix dtype. Inconsistent matrix shapes raise `ValueError` immediately,
+including during tracing.
+
 Systems is the public modeling namespace in Contrax. It brings together the
 objects and helpers you use to represent dynamics before you design a
 controller, run an estimator, or simulate a trajectory.

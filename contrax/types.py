@@ -1,7 +1,29 @@
 """Public result-bundle types."""
 
 import equinox as eqx
+import jax.numpy as jnp
 from jax import Array
+
+
+class LyapunovResult(eqx.Module):
+    """Solution and diagnostics for a continuous or discrete Lyapunov equation.
+
+    Attributes:
+        X: Equation solution. Shape: `(n, n)`.
+        status: Integer `contrax.solvers.SolverStatus` code. Shape: scalar.
+        num_steps: Number of doubling steps (zero for an explicit dense solve).
+        residual_norm: Frobenius norm of the equation residual.
+        successful: Whether the validated equation residual meets tolerance.
+    """
+
+    X: Array
+    status: Array
+    num_steps: Array
+    residual_norm: Array
+
+    @property
+    def successful(self) -> Array:
+        return self.status == jnp.asarray(0)
 
 
 class SimResult(eqx.Module):
@@ -49,12 +71,21 @@ class LQRResult(eqx.Module):
         S: Riccati solution matrix. Shape: `(n, n)`.
         poles: Closed-loop eigenvalues of the designed system. Shape: `(n,)`.
         residual_norm: Maximum absolute Riccati residual. Shape: scalar.
+        status: Integer `contrax.solvers.SolverStatus` code. Shape: scalar.
+        num_steps: Doubling iterations or accepted CARE refinement corrections.
+        successful: Whether the residual, cost and stability checks passed.
     """
 
     K: Array
     S: Array
     poles: Array
     residual_norm: Array
+    status: Array
+    num_steps: Array
+
+    @property
+    def successful(self) -> Array:
+        return self.status == jnp.asarray(0)
 
 
 class KalmanResult(eqx.Module):
@@ -110,11 +141,20 @@ class KalmanGainResult(eqx.Module):
         K: Steady-state measurement-update gain. Shape: `(n, p)`.
         P: Steady-state predicted covariance. Shape: `(n, n)`.
         poles: Estimator error-dynamics eigenvalues. Shape: `(n,)`.
+        status: Integer Riccati design status. Shape: scalar.
+        residual_norm: Maximum absolute dual Riccati residual.
+        successful: Whether the validated Riccati design succeeded.
     """
 
     K: Array
     P: Array
     poles: Array
+    status: Array
+    residual_norm: Array
+
+    @property
+    def successful(self) -> Array:
+        return self.status == jnp.asarray(0)
 
 
 class RTSResult(eqx.Module):
@@ -233,6 +273,7 @@ class LikelihoodDiagnostics(eqx.Module):
 
 
 __all__ = [
+    "LyapunovResult",
     "SimResult",
     "PlaceResult",
     "LQRResult",

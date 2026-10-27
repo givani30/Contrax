@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 from jax import Array
 
-from contrax._kalman import _measurement_flag, _symmetrize
+from contrax._kalman import _covariance_update, _measurement_flag, _symmetrize
 from contrax.nonlinear import (
     DynamicsLike,
     ObservationFn,
@@ -14,6 +14,7 @@ from contrax.nonlinear import (
     _is_system_model,
     _system_dt,
 )
+from contrax.solvers import EKF
 from contrax.types import KalmanResult
 
 
@@ -58,7 +59,7 @@ def ekf_update(
     u: Array | None = None,
     t: Array | float = 0.0,
     has_measurement: Array | bool = True,
-    num_iter: int = 1,
+    solver: EKF | None = None,
 ) -> tuple[Array, Array, Array]:
     """Update one extended Kalman filter step.
 
@@ -71,18 +72,18 @@ def ekf_update(
         u: Current input used by the observation model. Shape: `(m,)`.
         t: Current sample time.
         has_measurement: Whether to apply the measurement update.
-        num_iter: Number of iterated-EKF measurement linearization passes.
-            `1` gives the ordinary EKF update.
+        solver: Joseph covariance form and number of iterated linearizations.
+            `EKF(num_iter=1)` gives the ordinary EKF update.
 
     Returns:
         Tuple `(x, P, innovation)` with the filtered mean, filtered covariance,
         and final measurement residual. Missing-measurement steps return the
         prediction and a zero innovation.
     """
-    if num_iter < 1:
-        raise ValueError("num_iter must be at least 1")
+    solver = EKF() if solver is None else solver
+    if not isinstance(solver, EKF):
+        raise TypeError("ekf_update solver must be contrax.solvers.EKF")
 
-    n = x_pred.shape[0]
     if u is None:
         u = jnp.zeros((0,), dtype=x_pred.dtype)
     h = _coerce_observation(
@@ -97,23 +98,26 @@ def ekf_update(
         H = jax.jacfwd(h, argnums=1)(t, x_lin, u)
         S = H @ P_pred @ H.T + R_noise
         K = jnp.linalg.solve(S.T, (P_pred @ H.T).T).T
-        innov = y - h(t, x_lin, u) + H @ (x_lin - x_pred)
+        observed = jnp.where(_measurement_flag(has_measurement), y, jnp.zeros_like(y))
+        innov = observed - h(t, x_lin, u) + H @ (x_lin - x_pred)
         x_next = x_pred + K @ innov
         return x_next, (x_next, H, K, innov)
 
-    x_final, (_, Hs, Ks, innovations) = jax.lax.scan(
-        one_iteration,
-        x_pred,
-        xs=None,
-        length=num_iter,
-    )
-    H_final = Hs[-1]
-    K_final = Ks[-1]
-    innov_final = innovations[-1]
-    P_final = _symmetrize((jnp.eye(n, dtype=P_pred.dtype) - K_final @ H_final) @ P_pred)
-
     def apply_update():
-        return x_final, P_final, innov_final
+        x_final, (_, Hs, Ks, innovations) = jax.lax.scan(
+            one_iteration,
+            x_pred,
+            xs=None,
+            length=solver.num_iter,
+        )
+        P_final = _covariance_update(
+            P_pred,
+            Hs[-1],
+            Ks[-1],
+            R_noise,
+            solver.covariance_update,
+        )
+        return x_final, P_final, innovations[-1]
 
     def skip_update():
         return x_pred, P_pred, jnp.zeros_like(y)
@@ -136,8 +140,10 @@ def ekf_step(
     *,
     t: Array | float = 0.0,
     has_measurement: Array | bool = True,
-    num_iter: int = 1,
+    solver: EKF | None = None,
     observation: ObservationFn | None = None,
+    u_measurement: Array | None = None,
+    measurement_time: Array | float | None = None,
 ) -> tuple[Array, Array, Array]:
     """Run one predict-update step of an extended Kalman filter.
 
@@ -146,13 +152,17 @@ def ekf_step(
         x: Filtered mean at the previous time step. Shape: `(n,)`.
         P: Filtered covariance at the previous time step. Shape: `(n, n)`.
         u: Current input. Shape: `(m,)`.
+        t: Transition start time.
         y: Measurement vector. Shape: `(p,)`.
         Q_noise: Process noise covariance. Shape: `(n, n)`.
         R_noise: Measurement noise covariance. Shape: `(p, p)`.
         has_measurement: Whether to apply the measurement update.
-        num_iter: Number of iterated-EKF measurement linearization passes.
+        solver: Covariance update and number of iterated measurement passes.
         observation: Observation function `h(x)` for plain dynamics callables.
             Omit this when passing a system model with its own output map.
+        u_measurement: Input at the measurement time, defaulting to u.
+        measurement_time: Observation time. Defaults to t plus the model's
+            sample time when available, otherwise t.
 
     Returns:
         Tuple `(x, P, innovation)` after the step.
@@ -168,16 +178,19 @@ def ekf_step(
             )
         obs = observation
     x_pred, P_pred = ekf_predict(model_or_f, x, P, u, Q_noise, t=t)
+    if measurement_time is None:
+        dt = _system_dt(model_or_f)
+        measurement_time = t if dt is None else t + dt
     return ekf_update(
         obs,
         x_pred,
         P_pred,
         y,
         R_noise,
-        u=u,
-        t=t,
+        u=u if u_measurement is None else u_measurement,
+        t=measurement_time,
         has_measurement=has_measurement,
-        num_iter=num_iter,
+        solver=solver,
     )
 
 
@@ -191,15 +204,17 @@ def ekf(
     P0: Array,
     *,
     observation: ObservationFn | None = None,
+    has_measurement: Array | None = None,
+    solver: EKF | None = None,
 ) -> KalmanResult:
     """Run an extended Kalman filter for nonlinear dynamics and observations.
 
     Uses automatic Jacobians of the transition and observation functions rather
     than requiring a hand-derived local linearization.
 
-    This is the main nonlinear recursive estimation primitive in the current
-    library. It works well with JAX-defined model functions, but the API is
-    intentionally simple and does not yet expose multiple EKF variants.
+    Joseph covariance updates and one measurement linearization are the defaults.
+    Solver configuration selects compact covariance form or iterated updates.
+    Supports `jit`, `vmap` and derivatives through JAX-defined model functions.
 
     Args:
         model_or_f: Nonlinear system model or dynamics function.
@@ -211,6 +226,9 @@ def ekf(
         P0: Initial covariance. Shape: `(n, n)`.
         observation: Observation function `h(x)` for plain dynamics callables.
             Omit this when passing a system model with its own output map.
+        has_measurement: Whole-observation availability flags. Shape: `(T,)`.
+            Missing observations may contain NaNs and return zero innovations.
+        solver: Joseph covariance form and iterated measurement-update settings.
 
     Returns:
         [KalmanResult][contrax.types.KalmanResult]: A bundle containing
@@ -246,6 +264,20 @@ def ekf(
         obs = observation
 
     dt = _system_dt(model_or_f)
+    flags = (
+        jnp.ones((ys.shape[0],), dtype=bool)
+        if has_measurement is None
+        else has_measurement
+    )
+    if (
+        ys.ndim != 2
+        or us.ndim != 2
+        or us.shape[0] != ys.shape[0]
+        or flags.shape != (ys.shape[0],)
+    ):
+        raise ValueError(
+            "ys, us and has_measurement must have shapes (T, p), (T, m), (T,)"
+        )
     ts = jnp.arange(ys.shape[0], dtype=x0.dtype)
     if dt is not None:
         ts = ts * dt
@@ -253,7 +285,7 @@ def ekf(
     # Update-then-predict: x0/P0 is the prior on x_0.
     def update_predict(carry, inputs):
         x_prior, P_prior = carry
-        y, u, t = inputs
+        y, u, t, available = inputs
         x_post, P_post, innov = ekf_update(
             obs,
             x_prior,
@@ -262,9 +294,13 @@ def ekf(
             R_noise,
             u=u,
             t=t,
+            has_measurement=available,
+            solver=solver,
         )
         x_next, P_next = ekf_predict(model_or_f, x_post, P_post, u, Q_noise, t=t)
         return (x_next, P_next), (x_post, P_post, innov)
 
-    _, (x_hats, Ps, innovations) = jax.lax.scan(update_predict, (x0, P0), (ys, us, ts))
+    _, (x_hats, Ps, innovations) = jax.lax.scan(
+        update_predict, (x0, P0), (ys, us, ts, flags)
+    )
     return KalmanResult(x_hat=x_hats, P=Ps, innovations=innovations)

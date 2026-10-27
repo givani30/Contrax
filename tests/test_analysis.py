@@ -240,7 +240,7 @@ def test_lyap_stable_diagonal():
     # -> X = [[0.5, 0], [0, 0.25]]
     A = jnp.array([[-1.0, 0.0], [0.0, -2.0]])
     Q = jnp.eye(2)
-    X = cx.lyap(A, Q)
+    X = cx.lyap(A, Q).X
     residual = A @ X + X @ A.T + Q
     assert jnp.max(jnp.abs(residual)) < 1e-12
     assert jnp.allclose(X, jnp.diag(jnp.array([0.5, 0.25])), atol=1e-10)
@@ -249,7 +249,7 @@ def test_lyap_stable_diagonal():
 def test_lyap_symmetric_solution():
     A = jnp.array([[-3.0, 1.0], [-1.0, -2.0]])
     Q = jnp.array([[2.0, 0.5], [0.5, 1.0]])
-    X = cx.lyap(A, Q)
+    X = cx.lyap(A, Q).X
     assert jnp.max(jnp.abs(X - X.T)) < 1e-12
     assert jnp.max(jnp.abs(A @ X + X @ A.T + Q)) < 1e-10
 
@@ -259,7 +259,7 @@ def test_dlyap_stable_diagonal():
     # -> X = [[4/3, 0], [0, 100/91]]
     A = jnp.array([[0.5, 0.0], [0.0, 0.3]])
     Q = jnp.eye(2)
-    X = cx.dlyap(A, Q)
+    X = cx.dlyap(A, Q).X
     residual = A @ X @ A.T - X + Q
     assert jnp.max(jnp.abs(residual)) < 1e-12
     expected = jnp.diag(jnp.array([1.0 / (1 - 0.25), 1.0 / (1 - 0.09)]))
@@ -269,7 +269,7 @@ def test_dlyap_stable_diagonal():
 def test_dlyap_symmetric_solution():
     A = jnp.array([[0.6, 0.1], [-0.1, 0.5]])
     Q = jnp.array([[1.0, 0.2], [0.2, 0.5]])
-    X = cx.dlyap(A, Q)
+    X = cx.dlyap(A, Q).X
     assert jnp.max(jnp.abs(X - X.T)) < 1e-12
     assert jnp.max(jnp.abs(A @ X @ A.T - X + Q)) < 1e-10
 

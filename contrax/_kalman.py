@@ -6,6 +6,7 @@ from jax import Array
 
 from contrax._riccati import dare
 from contrax.core import DiscLTI
+from contrax.solvers import DARE, Kalman
 from contrax.types import KalmanGainResult, KalmanResult, RTSResult
 
 
@@ -19,6 +20,15 @@ def _zero_input(sys: DiscLTI, x: Array) -> Array:
 
 def _measurement_flag(has_measurement: Array | bool) -> Array:
     return jnp.asarray(has_measurement, dtype=bool)
+
+
+def _covariance_update(P, H, K, R, method):
+    # Reference: Joseph & Bucy (1968), Filtering for Stochastic Processes with
+    # Applications to Guidance. No eigenvalue clipping or covariance repair.
+    I_KH = jnp.eye(P.shape[0], dtype=P.dtype) - K @ H
+    if method == "joseph":
+        return _symmetrize(I_KH @ P @ I_KH.T + K @ R @ K.T)
+    return _symmetrize(I_KH @ P)
 
 
 def kalman_predict(
@@ -56,6 +66,7 @@ def kalman_update(
     u: Array | None = None,
     *,
     has_measurement: Array | bool = True,
+    solver: Kalman | None = None,
 ) -> tuple[Array, Array, Array]:
     """Update one linear Kalman filter step.
 
@@ -72,6 +83,7 @@ def kalman_update(
         u: Optional input for direct-feedthrough measurement models. Shape:
             `(m,)`. If omitted, the feedthrough term is zero.
         has_measurement: Whether to apply the measurement update.
+        solver: Joseph (default) or compact covariance-update configuration.
 
     Returns:
         Tuple `(x, P, innovation)` with the filtered mean, filtered covariance,
@@ -79,15 +91,20 @@ def kalman_update(
         innovation with the same shape as `y`.
     """
     u = _zero_input(sys, x_pred) if u is None else u
-    n = x_pred.shape[0]
-    y_pred = sys.C @ x_pred + sys.D @ u
-    S = sys.C @ P_pred @ sys.C.T + R_noise
-    K = jnp.linalg.solve(S.T, (P_pred @ sys.C.T).T).T
-    innov = y - y_pred
-    x_new = x_pred + K @ innov
-    P_new = _symmetrize((jnp.eye(n, dtype=P_pred.dtype) - K @ sys.C) @ P_pred)
+    solver = Kalman() if solver is None else solver
+    if not isinstance(solver, Kalman):
+        raise TypeError("kalman_update solver must be contrax.solvers.Kalman")
 
     def apply_update():
+        y_pred = sys.C @ x_pred + sys.D @ u
+        S = sys.C @ P_pred @ sys.C.T + R_noise
+        K = jnp.linalg.solve(S.T, (P_pred @ sys.C.T).T).T
+        # vmap lowers cond to selection; keep inactive NaN measurements out of
+        # arithmetic as well as keeping all work inside the scalar branch.
+        observed = jnp.where(_measurement_flag(has_measurement), y, jnp.zeros_like(y))
+        innov = observed - y_pred
+        x_new = x_pred + K @ innov
+        P_new = _covariance_update(P_pred, sys.C, K, R_noise, solver.covariance_update)
         return x_new, P_new, innov
 
     def skip_update():
@@ -110,6 +127,8 @@ def kalman_step(
     u: Array | None = None,
     *,
     has_measurement: Array | bool = True,
+    solver: Kalman | None = None,
+    u_measurement: Array | None = None,
 ) -> tuple[Array, Array, Array]:
     """Run one predict-update step of a linear Kalman filter.
 
@@ -126,6 +145,9 @@ def kalman_step(
         R_noise: Measurement noise covariance. Shape: `(p, p)`.
         u: Optional input. Shape: `(m,)`.
         has_measurement: Whether to apply the measurement update.
+        solver: Covariance-update configuration shared with batch filtering.
+        u_measurement: Input at the measurement time for direct feedthrough.
+            Defaults to u; pass separately when consecutive controls differ.
 
     Returns:
         Tuple `(x, P, innovation)` after the step.
@@ -137,8 +159,9 @@ def kalman_step(
         P_pred,
         y,
         R_noise,
-        u,
+        u if u_measurement is None else u_measurement,
         has_measurement=has_measurement,
+        solver=solver,
     )
 
 
@@ -146,6 +169,9 @@ def kalman_gain(
     sys: DiscLTI,
     Q_noise: Array,
     R_noise: Array,
+    *,
+    solver: DARE | None = None,
+    throw: bool = False,
 ) -> KalmanGainResult:
     """Design a steady-state Kalman filter gain for a discrete LTI system.
 
@@ -157,6 +183,8 @@ def kalman_gain(
         sys: Discrete-time linear system.
         Q_noise: Process noise covariance. Shape: `(n, n)`.
         R_noise: Measurement noise covariance. Shape: `(p, p)`.
+        solver: Dual DARE solver configuration.
+        throw: Raise on failed Riccati design.
 
     Returns:
         [KalmanGainResult][contrax.types.KalmanGainResult]: A bundle with
@@ -175,11 +203,18 @@ def kalman_gain(
         ... )
         >>> design = cx.kalman_gain(sys, 1e-3 * jnp.eye(2), 1e-2 * jnp.eye(2))
     """
-    P_pred = dare(sys.A.T, sys.C.T, Q_noise, R_noise).S
+    design = dare(sys.A.T, sys.C.T, Q_noise, R_noise, solver=solver, throw=throw)
+    P_pred = design.S
     innovation_cov = sys.C @ P_pred @ sys.C.T + R_noise
     K = jnp.linalg.solve(innovation_cov.T, (P_pred @ sys.C.T).T).T
     poles = jnp.linalg.eigvals(sys.A - sys.A @ K @ sys.C)
-    return KalmanGainResult(K=K, P=P_pred, poles=poles)
+    return KalmanGainResult(
+        K=K,
+        P=P_pred,
+        poles=poles,
+        status=design.status,
+        residual_norm=design.residual_norm,
+    )
 
 
 def kalman(
@@ -189,6 +224,10 @@ def kalman(
     ys: Array,  # (T, p) measurement sequence
     x0: Array | None = None,
     P0: Array | None = None,
+    *,
+    us: Array | None = None,
+    has_measurement: Array | None = None,
+    solver: Kalman | None = None,
 ) -> KalmanResult:
     """Run a linear discrete-time Kalman filter.
 
@@ -196,10 +235,9 @@ def kalman(
     [DiscLTI][contrax.systems.DiscLTI] system using the standard
     predict-update recursion expressed as a pure `lax.scan`.
 
-    This is the baseline linear-Gaussian estimation path in Contrax. Innovation
-    gains are computed with linear solves rather than explicit inverses, and
-    the scan structure makes small differentiable covariance-tuning loops
-    practical.
+    Innovation gains use linear solves and posterior covariances use Joseph
+    form by default. Supports `jit`, `vmap` and differentiable covariance tuning.
+    All input arrays should share a floating dtype; filtering preserves it.
 
     Args:
         sys: Discrete-time linear system.
@@ -209,6 +247,11 @@ def kalman(
         x0: Optional initial mean. Shape: `(n,)`. Defaults to zeros.
         P0: Optional initial covariance. Shape: `(n, n)`. Defaults to the
             identity matrix.
+        us: Controls for feedthrough at k and transition k to k+1. Shape:
+            `(T, m)`. Defaults to zeros; the final transition is not returned.
+        has_measurement: Whole-observation availability flags. Shape: `(T,)`.
+            Missing observations may contain NaNs and return zero innovations.
+        solver: Joseph (default) or compact covariance-update configuration.
 
     Returns:
         [KalmanResult][contrax.types.KalmanResult]: A bundle containing
@@ -233,6 +276,16 @@ def kalman(
         ... )
     """
     n = sys.A.shape[0]
+    if ys.ndim != 2 or ys.shape[1] != sys.C.shape[0]:
+        raise ValueError("ys must have shape (T, p)")
+    us = jnp.zeros((ys.shape[0], sys.B.shape[1]), dtype=ys.dtype) if us is None else us
+    flags = (
+        jnp.ones((ys.shape[0],), dtype=bool)
+        if has_measurement is None
+        else has_measurement
+    )
+    if us.shape != (ys.shape[0], sys.B.shape[1]) or flags.shape != (ys.shape[0],):
+        raise ValueError("us and has_measurement must have shapes (T, m) and (T,)")
     if x0 is None:
         x0 = jnp.zeros(n, dtype=ys.dtype)
     if P0 is None:
@@ -241,13 +294,25 @@ def kalman(
     # Update-then-predict: x0/P0 is the prior on x_0.
     # Each scan step updates with y_k first (using the current prior), then
     # predicts forward to give the prior on x_{k+1}.
-    def update_predict(carry, y):
+    def update_predict(carry, inputs):
         x_prior, P_prior = carry
-        x_post, P_post, innov = kalman_update(sys, x_prior, P_prior, y, R_noise)
-        x_next, P_next = kalman_predict(sys, x_post, P_post, Q_noise)
+        y, u, available = inputs
+        x_post, P_post, innov = kalman_update(
+            sys,
+            x_prior,
+            P_prior,
+            y,
+            R_noise,
+            u,
+            has_measurement=available,
+            solver=solver,
+        )
+        x_next, P_next = kalman_predict(sys, x_post, P_post, Q_noise, u)
         return (x_next, P_next), (x_post, P_post, innov)
 
-    _, (x_hats, Ps, innovations) = jax.lax.scan(update_predict, (x0, P0), ys)
+    _, (x_hats, Ps, innovations) = jax.lax.scan(
+        update_predict, (x0, P0), (ys, us, flags)
+    )
     return KalmanResult(x_hat=x_hats, P=Ps, innovations=innovations)
 
 
@@ -255,6 +320,8 @@ def rts(
     sys: DiscLTI,
     result: KalmanResult,
     Q_noise: Array,
+    *,
+    us: Array | None = None,
 ) -> RTSResult:
     """Run a Rauch-Tung-Striebel smoother on filtered Kalman results.
 
@@ -269,6 +336,8 @@ def rts(
         sys: Discrete-time linear system used in the forward filter.
         result: Output of `kalman()`.
         Q_noise: Process noise covariance used by the forward filter.
+        us: Controls from the forward filter. Shape: `(T, m)`. The last input
+            is unused; defaults to zeros.
 
     Returns:
         [RTSResult][contrax.types.RTSResult]: A bundle containing smoothed
@@ -294,13 +363,22 @@ def rts(
     """
     x_hats = result.x_hat  # (T, n)
     Ps = result.P  # (T, n, n)
+    if x_hats.shape[0] == 0:
+        return RTSResult(x_smooth=x_hats, P_smooth=Ps)
+    us = (
+        jnp.zeros((x_hats.shape[0], sys.B.shape[1]), dtype=x_hats.dtype)
+        if us is None
+        else us
+    )
+    if us.shape != (x_hats.shape[0], sys.B.shape[1]):
+        raise ValueError("us must have shape (T, m)")
 
     def smooth_step(carry, inputs):
         x_s, P_s = carry
-        x_f, P_f = inputs
+        x_f, P_f, u = inputs
 
         # Predicted mean/cov from forward pass
-        x_pred = sys.A @ x_f
+        x_pred = sys.A @ x_f + sys.B @ u
         P_pred = sys.A @ P_f @ sys.A.T + Q_noise
 
         G = jnp.linalg.solve(
@@ -314,7 +392,7 @@ def rts(
     init = (x_hats[-1], Ps[-1])
     # Scan backwards over t = T-2, ..., 0
     _, (x_smooth_rev, P_smooth_rev) = jax.lax.scan(
-        smooth_step, init, (x_hats[:-1][::-1], Ps[:-1][::-1])
+        smooth_step, init, (x_hats[:-1][::-1], Ps[:-1][::-1], us[:-1][::-1])
     )
     # Prepend the last (unsmoothed) estimate and reverse
     x_smooth = jnp.concatenate([x_smooth_rev[::-1], x_hats[-1:]], axis=0)

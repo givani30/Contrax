@@ -7,6 +7,7 @@ from jax.typing import ArrayLike
 from contrax._place import place  # noqa: F401 — re-exported
 from contrax._riccati import care, dare  # noqa: F401 — re-exported
 from contrax.core import ContLTI, DiscLTI
+from contrax.solvers import CARE, DARE
 from contrax.types import LQRResult
 
 __all__ = [
@@ -21,7 +22,14 @@ __all__ = [
 ]
 
 
-def lqr(sys: DiscLTI | ContLTI, Q: Array, R: Array) -> LQRResult:
+def lqr(
+    sys: DiscLTI | ContLTI,
+    Q: Array,
+    R: Array,
+    *,
+    solver: DARE | CARE | None = None,
+    throw: bool = False,
+) -> LQRResult:
     """Solve the infinite-horizon linear quadratic regulator problem.
 
     Dispatches to `dare()` for discrete systems and `care()` for continuous
@@ -37,6 +45,8 @@ def lqr(sys: DiscLTI | ContLTI, Q: Array, R: Array) -> LQRResult:
             [ContLTI][contrax.systems.ContLTI] system.
         Q: State cost matrix. Shape: `(n, n)`.
         R: Input cost matrix. Shape: `(m, m)`.
+        solver: DARE for discrete systems or CARE for continuous systems.
+        throw: Raise on numerical failure; otherwise return failure diagnostics.
 
     Returns:
         [LQRResult][contrax.types.LQRResult]: A bundle containing the optimal
@@ -60,9 +70,9 @@ def lqr(sys: DiscLTI | ContLTI, Q: Array, R: Array) -> LQRResult:
         >>> result = cx.lqr(sys, jnp.eye(2), jnp.array([[1.0]]))
     """
     if isinstance(sys, DiscLTI):
-        return dare(sys.A, sys.B, Q, R)
+        return dare(sys.A, sys.B, Q, R, solver=solver, throw=throw)
     elif isinstance(sys, ContLTI):
-        return care(sys.A, sys.B, Q, R)
+        return care(sys.A, sys.B, Q, R, solver=solver, throw=throw)
     else:
         raise TypeError(f"Expected DiscLTI or ContLTI, got {type(sys)}")
 
@@ -141,6 +151,8 @@ def lqi(
     C_integral: Array | None = None,
     D_integral: Array | None = None,
     *,
+    solver: DARE | CARE | None = None,
+    throw: bool = False,
     sign: float = 1.0,
     dt_scale: ArrayLike | None = None,
 ) -> LQRResult:
@@ -158,6 +170,8 @@ def lqi(
             `sys.C`.
         D_integral: Feedthrough map for the integrated output. Shape: `(r, m)`.
             Defaults to `sys.D`.
+        solver: DARE for discrete systems or CARE for continuous systems.
+        throw: Raise on numerical failure.
         sign: Sign applied to the integrated output.
         dt_scale: Discrete integration scale. Defaults to `sys.dt` for
             discrete systems and is ignored for continuous systems.
@@ -173,7 +187,7 @@ def lqi(
         sign=sign,
         dt_scale=dt_scale,
     )
-    return lqr(augmented, Q, R)
+    return lqr(augmented, Q, R, solver=solver, throw=throw)
 
 
 def state_feedback(sys: DiscLTI | ContLTI, K: Array) -> DiscLTI | ContLTI:

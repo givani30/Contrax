@@ -82,7 +82,8 @@ JAX building blocks.
 
 **Analysis**
 `ctrb`, `obsv`, `poles`, `evalfr`, `freqresp`, `dcgain`,
-`ctrb_gramian`, `obsv_gramian`, `lyap`, `dlyap`, `zeros`
+`ctrb_gramian`, `obsv_gramian`, `lyap`, `dlyap`, `zeros`,
+`quadratic_rollout_cost`
 
 **Diagnostics**
 `innovation_diagnostics`, `likelihood_diagnostics`, `ukf_diagnostics`,
@@ -96,10 +97,22 @@ JAX building blocks.
 `contrax.compat.python_control` — optional bidirectional conversion with
 [python-control](https://python-control.readthedocs.io/) (`pip install control`)
 
+Lyapunov solvers return a validated result bundle:
+
+```python
+result = cx.dlyap(A, Q, solver=cx.solvers.Lyapunov())
+X = result.X  # Check result.successful before using an unfamiliar equation.
+```
+
+`lyap` and `dlyap` support implicit forward/reverse differentiation, stable-system
+doubling and explicit general dense solves. Automatic dense fallback is bounded
+to eight states. See [analysis](docs/api/analysis.md) for the equation and failure
+contracts.
+
 ## Solver Status
 
-- **`dare`** — structured-doubling forward solve with implicit-differentiation VJP. Most mature path.
-- **`care`** — Hamiltonian stable-subspace solver with implicit backward pass. Validated, less benchmarked than `dare`.
+- **`dare`** — structured doubling with implicit JVP/VJP, scale-aware residual and stability checks.
+- **`care`** — Hamiltonian stable-subspace solve with accepted Newton corrections and implicit JVP/VJP. Closely separated subspaces can limit accuracy.
 - **`place`** — JAX-native KNV0/YT-style robust pole placement; Ackermann retained as SISO fallback only.
 - **`ekf` / `ukf` / `rts` / `uks`** — differentiable nonlinear filtering and smoothing with full JAX transform support.
 - **`mhe`** — LBFGS-backed fixed-window MHE. Useful optimization-based estimation primitive; not a full NLP framework.
@@ -130,6 +143,6 @@ Contrax is built on top of several excellent JAX-ecosystem libraries:
 - **[Optimistix](https://github.com/patrick-kidger/optimistix)** — LBFGS solver backing `mhe()`.
 - **[Lineax](https://github.com/patrick-kidger/lineax)** — linear solvers used in the estimation and Riccati paths.
 
-The DARE structured-doubling custom VJP is adapted from
+The DARE implicit differentiation approach draws on
 [trajax](https://github.com/google/trajax) (Google) and the DiLQR approach
 (ICML 2025). The UKF sigma-point rules follow Wan & van der Merwe (2000).

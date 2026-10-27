@@ -39,6 +39,7 @@ nav = [
     {"Estimation" = "api/estimation.md"},
     {"Analysis" = "api/analysis.md"},
     {"Types" = "api/types.md"},
+    {"Solvers" = "api/solvers.md"},
   ]},
   {"Theory" = [
     {"Discretization and linearization" = "theory/discretization-and-linearization.md"},

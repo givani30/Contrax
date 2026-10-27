@@ -12,8 +12,6 @@ from contrax._precision import require_x64
 from contrax.nonlinear import (
     DynamicsLike,
     OutputFn,
-    _coerce_dynamics,
-    _coerce_observation,
     _is_system_model,
 )
 
@@ -67,6 +65,20 @@ class DiscLTI(eqx.Module):
         return parallel(self, other, sign=-1.0)
 
 
+def _lti_arrays(A, B, C, D):
+    arrays = tuple(jnp.asarray(x) for x in (A, B, C, D))
+    dtype = jnp.result_type(*arrays, 1.0)
+    A, B, C, D = (x.astype(dtype) for x in arrays)
+    if any(x.ndim != 2 for x in (A, B, C, D)):
+        raise ValueError("A, B, C and D must be matrices")
+    n = A.shape[0]
+    if A.shape != (n, n) or B.shape[0] != n or C.shape[1] != n:
+        raise ValueError("A must be square and B/C state dimensions must match A")
+    if D.shape != (C.shape[0], B.shape[1]):
+        raise ValueError("D must have shape (number of outputs, number of inputs)")
+    return A, B, C, D
+
+
 def ss(A: ArrayLike, B: ArrayLike, C: ArrayLike, D: ArrayLike) -> ContLTI:
     """Construct a continuous-time state-space system.
 
@@ -77,6 +89,8 @@ def ss(A: ArrayLike, B: ArrayLike, C: ArrayLike, D: ArrayLike) -> ContLTI:
     This is a lightweight constructor rather than a solver. It is safe under
     normal JAX transforms with fixed-shape array inputs because it only wraps
     validated arrays into a data-only `eqx.Module`.
+    Matrix dtypes are promoted together; explicit float32 arrays retain their
+    precision even when float64 mode is enabled. Integer matrices become floating.
 
     Args:
         A: State matrix. Shape: `(n, n)`.
@@ -89,7 +103,7 @@ def ss(A: ArrayLike, B: ArrayLike, C: ArrayLike, D: ArrayLike) -> ContLTI:
             array-valued `A`, `B`, `C`, and `D` fields.
 
     Raises:
-        AssertionError: If the matrix shapes are inconsistent.
+        ValueError: If the matrix shapes are inconsistent.
 
     Examples:
         >>> import jax.numpy as jnp
@@ -101,15 +115,7 @@ def ss(A: ArrayLike, B: ArrayLike, C: ArrayLike, D: ArrayLike) -> ContLTI:
         ...     jnp.zeros((2, 1)),
         ... )
     """
-    A = jnp.asarray(A, dtype=float)
-    B = jnp.asarray(B, dtype=float)
-    C = jnp.asarray(C, dtype=float)
-    D = jnp.asarray(D, dtype=float)
-    n = A.shape[0]
-    assert A.shape == (n, n), f"A must be square, got {A.shape}"
-    assert B.shape[0] == n, f"B rows must match A, got {B.shape}"
-    assert C.shape[1] == n, f"C cols must match A, got {C.shape}"
-    assert D.shape == (C.shape[0], B.shape[1]), f"D shape mismatch, got {D.shape}"
+    A, B, C, D = _lti_arrays(A, B, C, D)
     return ContLTI(A=A, B=B, C=C, D=D)
 
 
@@ -129,6 +135,8 @@ def dss(
     This is a lightweight constructor rather than a solver. The sampling period
     is stored as a plain array leaf instead of static metadata, which keeps
     batching over systems more natural in JAX.
+    Matrix dtypes are promoted together, preserving explicit float32 data.
+    The sample time uses the resulting real matrix dtype.
 
     Args:
         A: State transition matrix. Shape: `(n, n)`.
@@ -142,7 +150,7 @@ def dss(
             array-valued `A`, `B`, `C`, `D`, and `dt` fields.
 
     Raises:
-        AssertionError: If the matrix shapes are inconsistent.
+        ValueError: If the matrix shapes are inconsistent or dt is not scalar.
 
     Examples:
         >>> import jax.numpy as jnp
@@ -155,16 +163,10 @@ def dss(
         ...     dt=0.1,
         ... )
     """
-    A = jnp.asarray(A, dtype=float)
-    B = jnp.asarray(B, dtype=float)
-    C = jnp.asarray(C, dtype=float)
-    D = jnp.asarray(D, dtype=float)
-    dt = jnp.asarray(dt, dtype=float)
-    n = A.shape[0]
-    assert A.shape == (n, n)
-    assert B.shape[0] == n
-    assert C.shape[1] == n
-    assert D.shape == (C.shape[0], B.shape[1])
+    A, B, C, D = _lti_arrays(A, B, C, D)
+    dt = jnp.asarray(dt, dtype=A.real.dtype)
+    if dt.ndim != 0:
+        raise ValueError("dt must be scalar")
     return DiscLTI(A=A, B=B, C=C, D=D, dt=dt)
 
 
@@ -345,10 +347,12 @@ def linearize(
     else:
         f = model_or_f
         if output is not None:
+
             def h(t_: Array, x: Array, u_: Array) -> Array:
                 del t_
                 return output(x, u_)
         else:
+
             def h(t_: Array, x: Array, u_: Array) -> Array:
                 del t_, u_
                 return x

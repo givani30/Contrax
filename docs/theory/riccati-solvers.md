@@ -123,11 +123,16 @@ The main goals of that implementation are:
 - robust forward solves on the existing benchmark slice
 - residual and closed-loop pole validation
 - JAX-native execution without CPU-only Schur or QZ routines in the hot path
-- a custom VJP that avoids unrolling solver iterations in the backward pass
+- implicit JVP and VJP rules that avoid unrolling solver iterations
 
 The backward pass solves the adjoint discrete Lyapunov equation for the
 converged Riccati solution and then lets gain computation differentiate from
-that solution.
+that solution. Both Riccati adjoints share the public Lyapunov equation kernel:
+residual-validated squared Smith iteration, with a Cayley transform for the
+continuous equation. Automatic dense fallback is limited to eight states;
+large failed iterations return nonfinite gradients rather than allocating an
+unbounded Kronecker operator. The public Lyapunov routines additionally expose
+implicit forward-mode differentiation and an explicit general dense solver.
 
 The practical implication is that gradients with respect to `A`, `B`, `Q`, and
 `R` are attached to the converged Riccati solution instead of the raw iteration
@@ -139,8 +144,8 @@ checks.
 
 ## Continuous Riccati: `care()`
 
-`care()` uses a Hamiltonian stable-subspace solve with an
-implicit-differentiation backward pass.
+`care()` uses a Hamiltonian stable-subspace solve with residual-decreasing
+Newton corrections and implicit forward/reverse differentiation.
 
 At the control level, `care()` plays the same role for continuous `lqr()`:
 solve for `S`, recover `K_c`, then inspect the spectrum of
@@ -151,16 +156,13 @@ Equations". Contrax follows the same stable-subspace idea but uses a JAX-native
 eigendecomposition path rather than a Schur-based LAPACK routine in the hot
 path.
 
-That makes continuous `lqr()` a supported design path, but
-the solver maturity is still lower than `dare()`:
-
-- the forward solve validates the Hamiltonian stable-subspace split and checks
-  the CARE residual before returning
-- the implementation has Octave-reference tests, JIT agreement tests, and
-  finite-difference gradient checks
-- the benchmark slice is smaller
-- broader conditioning diagnostics are still needed
-- Newton-Kleinman polishing may still prove useful on harder systems
+Newton corrections solve a continuous Lyapunov equation for the CARE residual.
+A correction is accepted only if its residual decreases and the resulting
+closed loop remains stable. The result validates cost definiteness, finite
+values, residual and stability in JAX in eager and compiled execution.
+`num_steps` counts accepted corrections. Poor separation of stable and unstable
+Hamiltonian eigenvalues can still prevent an accurate candidate; inspect status
+instead of assuming refinement guarantees success.
 
 ## Solver Selection And Schur-Based Methods
 
@@ -202,9 +204,10 @@ maturity rather than as a separate research exercise.
 
 Both Riccati solvers are written to stay inside the JAX execution model:
 
-- `dare()` uses a JAX-native structured-doubling forward solve plus a custom VJP
-- `care()` uses a JAX-native Hamiltonian eigendecomposition plus an implicit
-  custom VJP
+- `dare()` uses a JAX-native structured-doubling forward solve
+- `care()` uses a JAX-native Hamiltonian eigendecomposition and Newton refinement
+- both use a custom JVP for the implicit Riccati equation; JAX transposes its
+  Lyapunov solve for reverse differentiation
 
 That makes both paths suitable for compiled controller-design objectives, with
 the usual caveat that conditioning and benchmark coverage still matter.

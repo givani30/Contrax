@@ -1,3 +1,4 @@
+from contrax import solvers
 from contrax.analysis import (
     ctrb,
     ctrb_gramian,
@@ -9,6 +10,7 @@ from contrax.analysis import (
     obsv,
     obsv_gramian,
     poles,
+    quadratic_rollout_cost,
     zeros,
 )
 from contrax.control import (
@@ -94,6 +96,7 @@ from contrax.types import (
     KalmanResult,
     LikelihoodDiagnostics,
     LQRResult,
+    LyapunovResult,
     MHEResult,
     PHSStructureDiagnostics,
     PlaceResult,
@@ -104,6 +107,8 @@ from contrax.types import (
 )
 
 __all__ = [
+    "solvers",
+    "LyapunovResult",
     # system types
     "ContLTI",
     "DiscLTI",
@@ -183,6 +188,7 @@ __all__ = [
     "obsv_gramian",
     "lyap",
     "dlyap",
+    "quadratic_rollout_cost",
     # parameterization
     "positive_exp",
     "positive_softplus",

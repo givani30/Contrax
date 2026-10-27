@@ -26,12 +26,12 @@ def h(x):
 def one_step(x, P, y, u, has_measurement):
     return cx.ekf_step(
         f,
-        Q,
-        R,
-        y,
-        u,
         x,
         P,
+        u,
+        y,
+        Q,
+        R,
         observation=h,
         has_measurement=has_measurement,
     )
@@ -39,7 +39,7 @@ def one_step(x, P, y, u, has_measurement):
 
 x = jnp.array([1.0])
 P = jnp.array([[0.5]])
-y = jnp.array([10.0])       # dummy value with the right shape
+y = jnp.array([jnp.nan])    # missing values are never used in the update
 u = jnp.array([0.0])
 
 x_next, P_next, innovation = one_step(x, P, y, u, jnp.array(False))
@@ -60,8 +60,14 @@ The same pattern works with `kalman_step()` on linear systems.
 
 ## Preconditions And Limits
 
-- Pass a dummy measurement with the correct shape even when the sample is
-  missing.
+- Pass a measurement array with the correct shape; missing entries may be NaN.
+- Batch `kalman` and `ekf` accept a `(T,)` `has_measurement` mask with the same
+  meaning. The mask skips whole observations, rather than individual channels.
+- The initial mean and covariance in batch filters are priors for measurement
+  zero. Call the online update first, then predict and update for later samples.
+- Joseph covariance updates are the default. Select
+  `solver=cx.solvers.Kalman(covariance_update="compact")` or
+  `cx.solvers.EKF(covariance_update="compact")` explicitly for compact form.
 - This recipe handles missing samples, not irregular redefinition of the sample
   time. Irregular timing usually needs an explicit model for the new horizon.
 

@@ -10,7 +10,8 @@ The namespace includes:
 - `evalfr()`, `freqresp()`, and `dcgain()` for transfer evaluation
 - `ctrb_gramian()` and `obsv_gramian()` for finite-horizon continuous Gramians
 - `lyap()` and `dlyap()` for continuous and discrete Lyapunov equation solvers
-- `zeros()` for transmission zeros of square LTI systems
+- `zeros()` for finite invariant zeros of square or rectangular LTI systems
+- `quadratic_rollout_cost()` for exact finite-horizon discrete feedback costs
 
 ## Minimal Example
 
@@ -58,19 +59,91 @@ rather than hot-path primitives.
 `lyap(A, Q)` solves the continuous Lyapunov equation $A X + X A^\top + Q = 0$.
 `dlyap(A, Q)` solves the discrete form $A X A^\top - X + Q = 0$.
 
-Both are design-time utilities implemented via the Kronecker-form linear system.
-They are not intended for use in hot paths.
+Both return `LyapunovResult`; use `.X` for the matrix and `.successful` or
+`.status` to check the solve. The default uses squared Smith iteration for
+stable systems and validates the equation residual. Automatic dense fallback
+is restricted to at most eight states. It supports small nonstable equations;
+for larger nonstable equations select the dense solver explicitly:
 
-## Transmission Zeros
+```python
+result = cx.dlyap(A, Q, solver=cx.solvers.Lyapunov(method="dense"))
+X = result.X
+```
 
-`zeros(sys)` computes the transmission zeros of a square LTI system.
+Dense solves need O(n^4) memory and O(n^6) work. The stable doubling route uses
+O(n^2) storage and O(n^3) work per step. For continuous equations, a Cayley
+transform supplies the discrete equation. `method="doubling"` requires a
+stable state matrix and reports `invalid_problem` otherwise.
 
-For invertible $D$, zeros are the eigenvalues of $A - B D^{-1} C$.
+Both equations require float64 mode and real square matrices. The solution is
+unique when no eigenvalue sum is zero (continuous) or product is one
+(discrete). This condition also permits nonstable systems. Forward and reverse
+derivatives solve the implicit matrix equation; they do not differentiate
+through the stopping loop. Use `vmap` for independent equations.
 
-For $D = 0$ (the common case), zeros are computed via controlled-invariant
-subspace iteration using SVD-based null-space and range-space operations — no
-generalized Schur decomposition is required, keeping the computation JAX-native
-without a GPU-unfriendly LAPACK dispatch.
+`throw=False` returns failure diagnostics; `throw=True` raises through Equinox
+checks in eager or compiled execution. Singular equations and nonconvergent
+iterations must be handled before using their solutions. The returned residual
+is a Frobenius norm; success requires it to be at most
+`atol + rtol * scale`, where `scale` sums norms of the individual equation
+terms. This is a backward-error criterion, not a forward-error bound on an
+ill-conditioned equation.
+
+## Finite Invariant Zeros
+
+`zeros(sys)` computes finite rank drops of the Rosenbrock system pencil
+relative to its normal rank. It accepts square and rectangular realizations,
+including zero, singular and full-rank feedthrough matrices. For a minimal
+realization these are transmission zeros. Nonminimal realizations can include
+decoupling zeros absent from the minimal transfer realization.
+
+For square invertible $D$, the finite pencil reduces to
+$A - B D^{-1} C - \lambda I$.
+
+The general algorithm uses SVD-based orthogonal staircase reductions of the
+algebraic output constraints, followed by removal of right singular structure.
+The remaining finite pencil has identity coefficient for the spectral
+parameter and uses `jnp.linalg.eigvals`. SciPy and SLICOT are offline references.
+The formulation follows the finite-pencil reduction described by
+[SLICOT AB08ND](https://www.slicot.org/objects/software/shared/doc/AB08ND.html).
+Validation includes its rectangular nonminimal example and the transposed
+system, as well as independent generalized eigenvalues for regular square
+pencils.
+
+This is rank-dependent design-time analysis: float64 mode is required and
+`jit`, `vmap` and derivatives are unsupported. Tolerances determine numerical
+rank; near rank transitions, check sensitivity to `rtol`, `atol` and realization
+scaling. Infinite zeros and Kronecker indices are not returned.
+
+## Quadratic Feedback Costs
+
+`quadratic_rollout_cost(sys, K, Q, R, x0, num_steps=N)` computes
+
+$$
+\sum_{k=0}^{N-1} (x_k^\top Q x_k + u_k^\top R u_k)
++ x_N^\top Q_{\mathrm{terminal}} x_N,\qquad u_k=-Kx_k.
+$$
+
+Omit `Q_terminal` for zero terminal cost. The discrete system's sample time
+does not multiply the cost: Q and R define per-step weights. Binary Gramian
+composition uses O(log N) matrix products and O(n²) storage, without retaining
+a trajectory. Stability is unnecessary for a finite horizon, but long unstable
+horizons may overflow. It returns a scalar for one `(n,)` initial state;
+use `vmap` for batches:
+
+```python
+cost = cx.quadratic_rollout_cost(
+    sys_d, K, Q, R, x0, num_steps=100, Q_terminal=Q,
+)
+costs = jax.vmap(lambda x: cx.quadratic_rollout_cost(
+    sys_d, K, Q, R, x, num_steps=100,
+))(initial_states)
+```
+
+The horizon is a static nonnegative Python integer. Zero steps return only
+the optional initial-state terminal cost. Float32 and float64, `jit`, `vmap`,
+JVP and VJP are supported. Tests compare values and gain derivatives with an
+explicit state/input trajectory sum.
 
 ## Numerical Notes
 

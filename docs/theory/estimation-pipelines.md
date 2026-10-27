@@ -66,6 +66,11 @@ $$
 This is the right starting point when the model is already linear and the
 Gaussian assumptions are a reasonable first approximation.
 
+Contrax evaluates the posterior covariance in Joseph form by default,
+`(I-KC) P^- (I-KC).T + K R K.T`. This is algebraically equivalent to the compact
+equation above, while retaining the positive-semidefinite noise contribution
+explicitly under roundoff. The compact form is an explicit solver option.
+
 ### Extended Kalman Filter
 
 For nonlinear transition and observation maps,
@@ -101,6 +106,9 @@ $$
 
 This is the lightest nonlinear recursive path in the library. It works best
 when the local linearization is a good approximation over one update step.
+EKF uses the same Joseph form with the final measurement Jacobian. An explicit
+`EKF(num_iter=...)` solver relinearizes the update while holding the prior
+covariance fixed; both online and batch updates support it.
 
 ### Unscented Kalman Filter
 

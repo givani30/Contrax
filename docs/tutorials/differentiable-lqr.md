@@ -94,7 +94,7 @@ important check is simpler: the cost goes down and the gradients stay finite.
 Three pieces matter:
 
 1. `lqr()` on discrete systems goes through `dare()`, which has an
-   implicit-differentiation custom VJP rather than a backward pass that unrolls
+   implicit-differentiation JVP/VJP rules rather than a backward pass that unrolls
    the forward solver iterations.
 2. `simulate()` is a pure JAX closed-loop scan for discrete systems.
 3. the system object is a pytree-friendly Equinox module rather than a class
