@@ -365,6 +365,8 @@ def place(
         unpacking: ``K, poles = cx.place(...)``.
 
     Examples:
+        >>> import jax
+        >>> jax.config.update("jax_enable_x64", True)
         >>> import jax.numpy as jnp
         >>> import contrax as cx
         >>> sys = cx.dss(
@@ -372,6 +374,7 @@ def place(
         ...     jnp.array([[0.0], [1.0]]),
         ...     jnp.eye(2),
         ...     jnp.zeros((2, 1)),
+        ...     dt=0.1,
         ... )
         >>> result = cx.place(sys, jnp.array([0.6, 0.7]))
         >>> K = result.K  # or: K, achieved_poles = cx.place(...)

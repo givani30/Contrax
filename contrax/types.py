@@ -111,6 +111,8 @@ class LQRResult(eqx.Module):
         K: Optimal state-feedback gain. Shape: `(m, n)`.
         S: Riccati solution matrix. Shape: `(n, n)`.
         poles: Closed-loop eigenvalues of the designed system. Shape: `(n,)`.
+            Evaluated on access; differentiation follows JAX eigenvalue limits.
+        closed_loop: Closed-loop state matrix A-BK. Shape: `(n, n)`.
         residual_norm: Maximum absolute Riccati residual. Shape: scalar.
         status: Integer `contrax.solvers.SolverStatus` code. Shape: scalar.
         num_steps: Doubling iterations or accepted CARE refinement corrections.
@@ -119,10 +121,16 @@ class LQRResult(eqx.Module):
 
     K: Array
     S: Array
-    poles: Array
+    closed_loop: Array
     residual_norm: Array
     status: Array
     num_steps: Array
+
+    @property
+    def poles(self) -> Array:
+        # Evaluate only when requested: eager pole diagnostics must not restrict
+        # higher-order derivatives of objectives that use just K or S.
+        return jnp.linalg.eigvals(self.closed_loop)
 
     @property
     def successful(self) -> Array:
@@ -182,6 +190,7 @@ class KalmanGainResult(eqx.Module):
         K: Steady-state measurement-update gain. Shape: `(n, p)`.
         P: Steady-state predicted covariance. Shape: `(n, n)`.
         poles: Estimator error-dynamics eigenvalues. Shape: `(n,)`.
+        closed_loop: Predicted-error transition matrix A(I-KC). Shape: `(n, n)`.
         status: Integer Riccati design status. Shape: scalar.
         residual_norm: Maximum absolute dual Riccati residual.
         successful: Whether the validated Riccati design succeeded.
@@ -189,9 +198,13 @@ class KalmanGainResult(eqx.Module):
 
     K: Array
     P: Array
-    poles: Array
+    closed_loop: Array
     status: Array
     residual_norm: Array
+
+    @property
+    def poles(self) -> Array:
+        return jnp.linalg.eigvals(self.closed_loop)
 
     @property
     def successful(self) -> Array:

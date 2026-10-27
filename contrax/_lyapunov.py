@@ -106,15 +106,23 @@ def _solve(A, Q, continuous, solver):
     return X, (steps, status)
 
 
-def solve_lyapunov(A, Q, *, continuous, solver):
+def solve_lyapunov(A, Q, *, continuous, solver, return_info=True):
     """Solve the full matrix operator with implicit JVP and transposed solve."""
+
+    def solve(a, rhs):
+        X, info = _solve(a, rhs, continuous, solver)
+        if return_info:
+            return X, info
+        # Validation stays inside the declared solve, outside its AD rule.
+        return jnp.where(info[1] == 0, X, jnp.full_like(X, jnp.nan))
+
     # custom_linear_solve differentiates the equation, never its stopping loop.
     return jax.lax.custom_linear_solve(
         lambda X: _operator(A, X, continuous),
         Q,
-        solve=lambda _, rhs: _solve(A, rhs, continuous, solver),
-        transpose_solve=lambda _, rhs: _solve(A.T, rhs, continuous, solver),
-        has_aux=True,
+        solve=lambda _, rhs: solve(A, rhs),
+        transpose_solve=lambda _, rhs: solve(A.T, rhs),
+        has_aux=return_info,
     )
 
 

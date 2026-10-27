@@ -204,9 +204,7 @@ def test_safe_expm_reverse_gradient_matches_finite_difference():
 def test_c2d_gradient_finite(cont_sys):
     """jax.grad through c2d must produce finite gradients.
 
-    Without the custom_vjp on _safe_expm, native autodiff through the
-    scaling-and-squaring algorithm accumulates catastrophic numerical error
-    for stiff systems, producing NaN gradients.
+    Check the native scaling-and-squaring derivative on the reference model.
     Reference: Al-Mohy & Higham (2009), 'Computing the Frechet Derivative
     of the Matrix Exponential', SIAM J. Matrix Anal. Appl.
     """

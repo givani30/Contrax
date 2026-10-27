@@ -24,7 +24,7 @@ with `jit`, `vmap`, and `grad` behavior underneath.
 pip install contrax
 ```
 
-Requires Python 3.11+ and JAX 0.4+. For GPU support, install JAX separately
+Requires Python 3.11+ and JAX 0.9.2+. For GPU support, install JAX separately
 per the [JAX installation guide](https://jax.readthedocs.io/en/latest/installation.html)
 before installing Contrax.
 

@@ -39,7 +39,7 @@ exist.
 Important distinctions include:
 
 - plain autodiff through algebraic code
-- custom VJP through a numerically sensitive primitive
+- native forward/reverse derivatives through algebraic primitives
 - implicit differentiation through a fixed-point or Riccati solve
 
 If a public function does not compose well with `grad`, the docs should say so.

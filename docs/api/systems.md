@@ -219,8 +219,8 @@ simulation.
 
 The `c2d()` methods are:
 
-- `zoh`: the stronger path, with a custom VJP around the matrix
-  exponential
+- `zoh`: exact held-input discretization through the native differentiable
+  matrix exponential; supports JVP, VJP and higher derivatives
 - `tustin`: a convenience bilinear transform
 
 <figure class="contrax-figure">

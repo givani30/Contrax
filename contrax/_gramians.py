@@ -121,6 +121,10 @@ def ctrb_gramian(
             Finite discrete num_steps reports the horizon term count.
 
     Examples:
+        >>> import jax
+        >>> jax.config.update("jax_enable_x64", True)
+        >>> import contrax as cx
+        >>> sys = cx.dss([[0.8]], [[1.0]], [[1.0]], [[0.0]], dt=1)
         >>> result = ctrb_gramian(sys, num_steps=20)
         >>> Wc = result.X
     """
@@ -157,6 +161,10 @@ def obsv_gramian(
             Finite discrete num_steps reports the horizon term count.
 
     Examples:
+        >>> import jax
+        >>> jax.config.update("jax_enable_x64", True)
+        >>> import contrax as cx
+        >>> sys = cx.ss([[-1.0]], [[1.0]], [[1.0]], [[0.0]])
         >>> result = obsv_gramian(sys, t=2.0)
         >>> Wo = result.X
     """

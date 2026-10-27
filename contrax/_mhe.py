@@ -36,16 +36,33 @@ def _weighted_sum_squares(residuals: Array, covariance: Array) -> Array:
 def soft_quadratic_penalty(residuals: Array, weight: Array) -> Array:
     """Return a quadratic soft penalty with matrix or scalar weighting.
 
-    This helper is intended for optional MHE soft costs such as state-envelope
-    penalties or terminal-state regularization. It stays small on purpose:
-    callers define the residuals they care about and use this helper for the
-    weighted quadratic part.
+    A scalar weight multiplies the total squared residual norm; a matrix weight
+    computes sum r.T @ weight @ r over the leading residual axes. Both represent
+    precision/cost weights, rather than covariances. Choose nonnegative scalar
+    or positive-semidefinite matrix weights for a nonnegative penalty.
+
+    Supports `jit`, `vmap`, JVP and VJP, including derivatives of weight.
+
+    Args:
+        residuals: Real residual array, with final dimension n for matrix weights.
+        weight: Scalar weight or square cost matrix. Matrix shape: `(n, n)`.
+
+    Returns:
+        Array: Scalar weighted quadratic cost.
     """
     residuals = jnp.asarray(residuals)
     weight = jnp.asarray(weight)
+    if jnp.iscomplexobj(residuals) or jnp.iscomplexobj(weight):
+        raise ValueError("soft_quadratic_penalty requires real residuals and weights")
     if weight.ndim == 0:
         return weight * jnp.sum(residuals**2)
-    return _weighted_sum_squares(residuals, weight)
+    if (
+        residuals.ndim < 1
+        or weight.ndim != 2
+        or weight.shape != (residuals.shape[-1], residuals.shape[-1])
+    ):
+        raise ValueError("matrix weight must match the final residual dimension")
+    return jnp.einsum("...i,ij,...j->", residuals, weight, residuals)
 
 
 def mhe_warm_start(

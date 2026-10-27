@@ -235,8 +235,8 @@ def sample_system(
         >>> field = cx.nonlinear_system(lambda t, x, u: -x + u)
         >>> sampled = cx.sample_system(field, 0.1, max_steps=256)
         >>> result = sampled.step(0.0, jnp.ones(1), jnp.zeros(1))
-        >>> result.successful
-        Array(True, dtype=bool)
+        >>> bool(result.successful)
+        True
     """
     if sys.dt is not None:
         raise ValueError("sample_system() expects a continuous system with dt=None.")

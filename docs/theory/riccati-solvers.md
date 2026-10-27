@@ -209,6 +209,11 @@ Both Riccati solvers are written to stay inside the JAX execution model:
 - both use a custom JVP for the implicit Riccati equation; JAX transposes its
   Lyapunov solve for reverse differentiation
 
+Gain and Riccati-solution Hessians have analytic scalar reference coverage,
+including a composed `c2d -> lqr` objective. Pole diagnostics are evaluated on
+access rather than during those objectives. Differentiating poles themselves
+has the separate restrictions of JAX's nonsymmetric eigensolver.
+
 That makes both paths suitable for compiled controller-design objectives, with
 the usual caveat that conditioning and benchmark coverage still matter.
 

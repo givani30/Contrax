@@ -62,6 +62,8 @@ def zeros(
         ValueError: For complex/nonfinite matrices or invalid rank tolerances.
 
     Examples:
+        >>> import jax
+        >>> jax.config.update("jax_enable_x64", True)
         >>> import contrax as cx
         >>> import jax.numpy as jnp
         >>> sys = cx.ss(jnp.array([[-2.]]), jnp.ones((1, 1)),

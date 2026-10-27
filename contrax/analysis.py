@@ -202,11 +202,13 @@ def lyap(
         LyapunovResult: Solution `X`, status, iteration count and residual norm.
 
     Examples:
+        >>> import jax
+        >>> jax.config.update("jax_enable_x64", True)
         >>> import contrax as cx
         >>> import jax.numpy as jnp
         >>> result = cx.lyap(-jnp.eye(2), jnp.eye(2))
-        >>> result.successful
-        Array(True, dtype=bool)
+        >>> bool(result.successful)
+        True
     """
     return lyapunov(A, Q, continuous=True, solver=solver, throw=throw)
 
@@ -236,10 +238,12 @@ def dlyap(
         LyapunovResult: Solution `X`, status, iteration count and residual norm.
 
     Examples:
+        >>> import jax
+        >>> jax.config.update("jax_enable_x64", True)
         >>> import contrax as cx
         >>> import jax.numpy as jnp
         >>> result = cx.dlyap(0.5 * jnp.eye(2), jnp.eye(2))
-        >>> result.successful
-        Array(True, dtype=bool)
+        >>> bool(result.successful)
+        True
     """
     return lyapunov(A, Q, continuous=False, solver=solver, throw=throw)

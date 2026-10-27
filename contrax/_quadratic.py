@@ -59,6 +59,8 @@ def quadratic_rollout_cost(
         ValueError: For a negative horizon or inconsistent shapes.
 
     Examples:
+        >>> import jax
+        >>> jax.config.update("jax_enable_x64", True)
         >>> import contrax as cx
         >>> import jax.numpy as jnp
         >>> sys = cx.dss(jnp.eye(1), jnp.eye(1), jnp.eye(1), jnp.zeros((1, 1)), 1)

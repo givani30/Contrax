@@ -192,6 +192,8 @@ def kalman_gain(
             estimator error-dynamics poles.
 
     Examples:
+        >>> import jax
+        >>> jax.config.update("jax_enable_x64", True)
         >>> import jax.numpy as jnp
         >>> import contrax as cx
         >>> sys = cx.dss(
@@ -207,11 +209,11 @@ def kalman_gain(
     P_pred = design.S
     innovation_cov = sys.C @ P_pred @ sys.C.T + R_noise
     K = jnp.linalg.solve(innovation_cov.T, (P_pred @ sys.C.T).T).T
-    poles = jnp.linalg.eigvals(sys.A - sys.A @ K @ sys.C)
+    closed_loop = sys.A - sys.A @ K @ sys.C
     return KalmanGainResult(
         K=K,
         P=P_pred,
-        poles=poles,
+        closed_loop=closed_loop,
         status=design.status,
         residual_norm=design.residual_norm,
     )

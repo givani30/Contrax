@@ -309,6 +309,11 @@ For rolling-window use:
 - `soft_quadratic_penalty(residuals, weight)` is a small helper for soft state,
   terminal, or envelope penalties inside `extra_cost`
 
+Scalar and matrix penalty weights both represent cost/precision weighting:
+`w * sum(r**2)` or `sum(r.T @ W @ r)`. A matrix is not interpreted as a
+covariance. For a covariance-weighted residual, use an explicit factor solve
+before applying a scalar penalty.
+
 ## One-Step Helper Signatures
 
 The one-step helpers follow the order: **model, state `(x, P)`, runtime data

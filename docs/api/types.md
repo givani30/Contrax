@@ -42,6 +42,13 @@ workflow design:
 
 Some fields are especially worth knowing about:
 
+`LQRResult.closed_loop` and `KalmanGainResult.closed_loop` retain the designed
+error/feedback transition matrices. Their `.poles` properties evaluate
+eigenvalues on access, so unused pole diagnostics do not restrict higher-order
+derivatives of gain/covariance objectives. Pole objectives follow JAX's
+nonsymmetric eigenvalue differentiation limits; higher derivatives of those
+eigenvalues are not provided by JAX.
+
 - [`LQRResult.residual_norm`](#contrax.types.LQRResult.residual_norm): a JAX
   scalar Riccati residual diagnostic
 - [`KalmanResult.innovations`](#contrax.types.KalmanResult.innovations): the

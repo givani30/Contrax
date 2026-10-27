@@ -801,10 +801,7 @@ def test_soft_quadratic_penalty_supports_scalar_and_matrix_weights():
     assert jnp.allclose(scalar_cost, 0.5 * jnp.sum(residuals**2))
     manual_matrix = 0.0
     for row in residuals:
-        manual_matrix = manual_matrix + row @ jnp.linalg.solve(
-            jnp.diag(jnp.array([2.0, 4.0])),
-            row,
-        )
+        manual_matrix = manual_matrix + row @ jnp.diag(jnp.array([2.0, 4.0])) @ row
     assert jnp.allclose(matrix_cost, manual_matrix)
 
 

@@ -75,13 +75,16 @@ and reference-checked design workflows.
 
 ## Zero-Order Hold Path
 
-The zero-order-hold discretization goes through the matrix exponential. In
-plain forward mode that is straightforward, but gradients through the matrix
-exponential can become numerically fragile on stiff systems.
+Zero-order-hold discretization uses JAX's native matrix exponential and its
+forward/reverse derivatives. It supports `jacfwd`, `jacrev` and higher-order
+workflows without a reverse-only custom rule. Stiff nonnormal regression cases
+compare both derivative directions with independent SciPy Frechet derivatives;
+scalar ZOH Jacobians and Hessians have closed-form reference checks.
 
-That is why Contrax uses a custom VJP around the matrix exponential in this
-path: the forward formula alone is not the whole contract. The gradient story
-is part of the feature.
+Like any scaling-and-squaring computation, numerical range and conditioning
+limit usable inputs. Large matrix norms can exceed the exponential's squaring
+budget; a badly conditioned exponential or derivative remains sensitive to
+roundoff. Enable float64 before constructing precision-sensitive design data.
 
 For zero-order hold, the continuous-to-discrete map is
 

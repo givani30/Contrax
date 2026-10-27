@@ -248,6 +248,8 @@ def simulate(
         and `(N, p)` where `N` is the number of saved samples on the output grid.
 
     Examples:
+        >>> import jax
+        >>> jax.config.update("jax_enable_x64", True)
         >>> import jax.numpy as jnp
         >>> import contrax as cx
         >>> sys_d = cx.dss(

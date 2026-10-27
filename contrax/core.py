@@ -170,34 +170,14 @@ def dss(
     return DiscLTI(A=A, B=B, C=C, D=D, dt=dt)
 
 
-# ── custom VJP for matrix exponential ──────────────────────────────────────
-# Native autodiff through jax.scipy.linalg.expm (scaling-and-squaring)
-# accumulates catastrophic numerical error for stiff systems.
-# We use the exact analytical gradient via the augmented block matrix method.
-# Reference: Al-Mohy & Higham (2009) — Fréchet derivative of the matrix exp.
+# Reference: Al-Mohy & Higham (2009), "Computing the Frechet Derivative of the
+# Matrix Exponential", SIAM J. Matrix Anal. Appl. JAX differentiates its Padé
+# scaling-and-squaring path natively. Regressions compare both differentiation
+# directions with block Frechet and SciPy oracles on stiff/nonnormal matrices.
 
 
-@jax.custom_vjp
 def _safe_expm(M: Array) -> Array:
     return jax.scipy.linalg.expm(M)
-
-
-def _safe_expm_fwd(M: Array):
-    eM = _safe_expm(M)
-    return eM, (M, eM)
-
-
-def _safe_expm_bwd(res, g):
-    M, eM = res
-    n = M.shape[0]
-    # VJP is the adjoint Frechet derivative. Under the Frobenius inner product,
-    # L_exp(M)^*(G) = L_exp(M.T, G).
-    aug = jnp.block([[M.T, g], [jnp.zeros_like(M), M.T]])
-    eaug = jax.scipy.linalg.expm(aug)
-    return (eaug[:n, n:],)
-
-
-_safe_expm.defvjp(_safe_expm_fwd, _safe_expm_bwd)
 
 
 # ── c2d ────────────────────────────────────────────────────────────────────
@@ -210,9 +190,9 @@ def c2d(sys: ContLTI, dt: float, method: str = "zoh") -> DiscLTI:
     [DiscLTI][contrax.systems.DiscLTI] using either zero-order hold or the
     bilinear Tustin transform.
 
-    The `zoh` path is the stronger current implementation and is differentiated
-    through a custom VJP on the matrix exponential. `tustin` is available as a
-    convenience discretization.
+    Both paths support `jit`, `vmap`, forward/reverse differentiation and higher
+    derivatives. ZOH differentiates JAX's matrix exponential natively. Requires
+    explicit float64 mode for precision-sensitive discretization.
 
     Args:
         sys: Continuous-time system.
@@ -228,6 +208,8 @@ def c2d(sys: ContLTI, dt: float, method: str = "zoh") -> DiscLTI:
         ValueError: If `method` is not one of the supported discretizations.
 
     Examples:
+        >>> import jax
+        >>> jax.config.update("jax_enable_x64", True)
         >>> import jax.numpy as jnp
         >>> import contrax as cx
         >>> sys_c = cx.ss(
