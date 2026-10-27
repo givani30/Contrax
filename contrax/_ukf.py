@@ -85,7 +85,7 @@ def ukf(
     solver: UKF | None = None,
     throw: bool = False,
 ) -> UKFResult:
-    """Run a discrete-time unscented Kalman filter for nonlinear dynamics and observations.
+    """Run an unscented Kalman filter for discrete nonlinear models.
 
     Propagates means and covariances through nonlinear transition and
     observation models with a deterministic sigma-point transform.
