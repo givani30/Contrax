@@ -119,7 +119,8 @@ def mhe_objective(
         model_or_f: Discrete system model, or transition callable `f(x, u)`
             (`f(x, u, params)` when params are supplied).
         xs: Candidate state trajectory. Shape: `(N, n)`, N >= 1.
-        us: Transition input sequence. Shape: `(N-1, m)`.
+        us: Transition inputs. Shape: `(N-1, m)`, or `(N-1, 2, m)`
+            for a sampled FOH model.
         ys: Measurement sequence aligned with xs. Shape: `(N, p)`.
         x_prior: Prior state for the start of the window. Shape: `(n,)`.
         P_prior: Arrival covariance. Shape: `(n, n)`.
@@ -132,8 +133,9 @@ def mhe_objective(
             `extra_cost(xs, us, ys, params)` otherwise.
         ts: Sample times for system-model callables. Shape: `(N,)`. Defaults to
             integer steps multiplied by the model sample period when available.
-        measurement_us: Observation inputs. Shape: `(N, m)`. Defaults to us
-            with the last input held at the terminal observation (zero for N=1).
+        measurement_us: N observation inputs with the same trailing shape as us.
+            Defaults to us with the final input endpoint held at the terminal
+            observation (zero for N=1). FOH observations use each pair's left input.
 
     Returns:
         Array: Scalar MHE cost.
@@ -208,7 +210,8 @@ def mhe(
             (`f(x, u, params)` when params are supplied).
         xs_init: Initial trajectory guess. Shape: `(N, n)`, N >= 1. Using the
             Kalman filtered means as a warm start is recommended.
-        us: Input sequence. Shape: `(N - 1, m)`.
+        us: Transition inputs. Shape: `(N-1, m)`, or `(N-1, 2, m)`
+            for a sampled FOH model.
         ys: Measurement sequence aligned with xs. Shape: `(N, p)`.
         x_prior: Prior mean for the start of the window.  Shape: `(n,)`.
         P_prior: Arrival covariance.  Shape: `(n, n)`.
@@ -223,8 +226,9 @@ def mhe(
             `optx.LBFGS(rtol=1e-6, atol=1e-6)`.
         max_steps: Maximum solver iterations.  Defaults to 256.
         ts: System-model sample times. Shape: `(N,)`.
-        measurement_us: Observation inputs. Shape: `(N, m)`. Defaults to
-            holding the final transition control for the final observation.
+        measurement_us: N observation inputs with the same trailing shape as us.
+            Defaults to holding the final input endpoint at the final observation
+            (zero for N=1). FOH observations use each pair's left input.
         throw: Raise on failed convergence; otherwise return status diagnostics.
 
     Returns:

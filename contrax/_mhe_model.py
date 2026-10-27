@@ -11,7 +11,7 @@ def validate_window(xs, us, ys, x_prior, P_prior, Q_noise, R_noise):
     if xs.ndim != 2 or xs.shape[0] < 1 or xs.shape[1] < 1:
         raise ValueError("xs must have shape (N, n), with N >= 1 and n >= 1")
     N, n = xs.shape
-    if us.ndim != 2 or us.shape[0] != N - 1 or ys.ndim != 2 or ys.shape[0] != N:
+    if us.ndim < 2 or us.shape[0] != N - 1 or ys.ndim != 2 or ys.shape[0] != N:
         raise ValueError("MHE requires N states/measurements and N-1 transition inputs")
     if x_prior.shape != (n,) or P_prior.shape != (n, n) or Q_noise.shape != (n, n):
         raise ValueError(
@@ -34,13 +34,30 @@ def model_predictions(model, observation, xs, us, params, ts, measurement_us):
         )
     if ts.shape != (N,):
         raise ValueError("ts must have shape (N,)")
+    input_shape = getattr(model, "_input_shape", None)
+    input_dim = (
+        model.B.shape[1]
+        if isinstance(model, DiscLTI)
+        else getattr(model, "input_dim", None)
+    )
+    if input_shape is not None:
+        if us.ndim != len(input_shape) + 1 or us.shape[1:-1] != input_shape[:-1]:
+            raise ValueError("us must match the sampled model input structure")
+        if input_dim is not None and us.shape[1:] != input_shape:
+            raise ValueError("us must match the model input dimensions")
+    elif input_dim is not None and us.shape[1:] != (input_dim,):
+        raise ValueError("us must match the model input dimensions")
     if measurement_us is None:
         # N-1 controls define transitions. For observations, hold the last
-        # transition input at the terminal sample; a one-state window uses zero.
-        last = us[-1:] if N > 1 else jnp.zeros((1, us.shape[1]), dtype=us.dtype)
+        # input endpoint at the terminal sample; a one-state window uses zero.
+        last = us[-1:] if N > 1 else jnp.zeros((1, *us.shape[1:]), dtype=us.dtype)
+        if input_shape is not None and input_shape[0] == 2:
+            last = jnp.repeat(last[:, -1:, :], 2, axis=1)
         measurement_us = jnp.concatenate([us, last], axis=0)
-    if measurement_us.shape != (N, us.shape[1]):
-        raise ValueError("measurement_us must have shape (N, m)")
+    if measurement_us.shape != (N, *us.shape[1:]):
+        raise ValueError(
+            "measurement_us must have N inputs with the same trailing shape as us"
+        )
 
     if isinstance(model, DiscLTI):
         if observation is not None or params is not None:

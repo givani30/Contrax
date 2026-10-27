@@ -274,6 +274,9 @@ x_prior, P_prior, Q_noise, R_noise)`. The window contains N states and
 measurements, with N−1 transition inputs; a one-state window is valid. For
 input-dependent measurements, `measurement_us` supplies N controls; its default
 holds the last transition input at the final observation (zero for N=1).
+For sampled FOH models, transition inputs have shape `(N-1, 2, m)` and
+`measurement_us` has shape `(N, 2, m)`. Each observation uses its pair's left
+endpoint. The default terminal pair holds the last right endpoint at both ends.
 `ts` supplies explicit sample times for time-dependent models. Callable
 transitions accept `f(x, u)` and require `observation=h` separately.
 
@@ -502,9 +505,17 @@ and tuning workflows:
 - `diagonal_spd(raw_diagonal)` builds a diagonal SPD matrix from unconstrained
   diagonal parameters
 
-These are intentionally low-level building blocks rather than a parameter
-framework. They exist so downstream repos do not need to reinvent the same
-positivity and covariance-parameterization transforms.
+These helpers accept real inputs and support `jit`, `vmap` and forward/reverse
+differentiation. Integer raw parameters are promoted to floating point; floating
+inputs retain their precision unless an explicitly higher-precision floor is
+provided. Floors must be finite, nonnegative scalars. Cholesky maps require a
+square matrix and `diagonal_spd` requires a vector. An overridden triangular
+diagonal participates in dtype promotion, so fractional entries are retained.
+
+Positive definiteness holds in exact arithmetic. With a zero floor, very negative
+parameters can underflow to zero; exponential overflow and ill-conditioned
+Cholesky factors can also defeat floating-point definiteness. The helpers apply
+the requested transform without clipping or covariance repair.
 
 ## Related Pages
 

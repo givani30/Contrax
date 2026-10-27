@@ -2,6 +2,7 @@
 
 import jax
 import jax.numpy as jnp
+import pytest
 
 import contrax as cx
 
@@ -755,6 +756,29 @@ def test_positive_parameterizations_are_positive_and_jittable():
         jnp.array([[1.0, 2.0], [3.0, 4.0]]), diagonal=jnp.array([10.0, 20.0])
     )
     assert jnp.allclose(L, jnp.array([[10.0, 0.0], [3.0, 20.0]]))
+    integer_spd = cx.spd_from_cholesky_raw(jnp.zeros((2, 2), dtype=int))
+    expected = (jax.nn.softplus(0.0) + 1e-6) ** 2 * jnp.eye(2)
+    assert jnp.allclose(integer_spd, expected)
+    assert cx.positive_exp(jnp.zeros(2, dtype=jnp.float32)).dtype == jnp.float32
+    assert (
+        cx.lower_triangular(jnp.zeros((1, 1), dtype=int), diagonal=jnp.array([0.5]))[
+            0, 0
+        ]
+        == 0.5
+    )
+    for invalid_floor in (-1.0, jnp.nan, jnp.inf):
+        with pytest.raises(ValueError, match="finite and nonnegative"):
+            cx.positive_softplus(0, min_value=invalid_floor)
+    with pytest.raises(ValueError, match="shape"):
+        cx.diagonal_spd(jnp.zeros((2, 2)))
+    with pytest.raises(ValueError, match="real"):
+        cx.spd_from_cholesky_raw(jnp.eye(2, dtype=complex))
+    with pytest.raises(Exception, match="finite and nonnegative"):
+        jax.jit(lambda floor: cx.positive_exp(0.0, min_value=floor))(-1.0)
+    def loss(value):
+        return jnp.sum(cx.spd_from_cholesky_raw(value))
+
+    assert jnp.allclose(jax.jacfwd(loss)(raw), jax.grad(loss)(raw))
 
 
 def test_ukf_likelihood_and_noise_gradients_match_joint_gaussian():

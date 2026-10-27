@@ -9,11 +9,12 @@ The root package loads this bridge only on explicit import.
 
 from __future__ import annotations
 
+from types import ModuleType
 from typing import TYPE_CHECKING
 
 import jax.numpy as jnp
 
-from contrax.core import ContLTI, DiscLTI
+from contrax.core import ContLTI, DiscLTI, dss, ss
 
 if TYPE_CHECKING:
     try:
@@ -24,7 +25,7 @@ if TYPE_CHECKING:
 __all__ = ["from_python_control", "to_python_control"]
 
 
-def _require_control() -> "control":
+def _require_control() -> ModuleType:
     try:
         import control
 
@@ -32,7 +33,7 @@ def _require_control() -> "control":
     except ImportError as e:
         raise ImportError(
             "python-control is required for contrax.compat.python_control. "
-            "Install it with: pip install control"
+            "Install it with: uv add control"
         ) from e
 
 
@@ -48,12 +49,17 @@ def from_python_control(
 
     Args:
         sys: python-control ``StateSpace`` instance.
-        dt: Override the discrete sample time. Required if ``sys.dt`` is
-            ``True`` (unspecified dt) or missing. Ignored for continuous
-            systems.
+        dt: Override a discrete sample time with a finite positive real scalar.
+            Required for dt=True or dt=None. For dt=None, dt=0 selects a
+            continuous model. Ignored for an explicitly continuous source.
 
     Returns:
         ContLTI | DiscLTI: Equivalent continuous- or discrete-time system.
+
+    Notes:
+        Host conversion only; not jit-, vmap- or differentiation-compatible.
+        Matrix precision follows JAX's configured dtype support; enable x64
+        before conversion to retain double precision source arrays.
 
     Raises:
         TypeError: If ``sys`` is not a ``control.StateSpace``.
@@ -76,29 +82,32 @@ def from_python_control(
             "Convert transfer functions with control.ss(sys) first."
         )
 
-    A = jnp.asarray(sys.A, dtype=float)
-    B = jnp.asarray(sys.B, dtype=float)
-    C = jnp.asarray(sys.C, dtype=float)
-    D = jnp.asarray(sys.D, dtype=float)
+    A, B, C, D = (jnp.asarray(value) for value in (sys.A, sys.B, sys.C, sys.D))
 
     # python-control uses sys.dt: 0 or 0.0 for continuous, True for unspecified
     # discrete, or a positive float for discrete with known dt.
-    sys_dt = getattr(sys, "dt", 0)
+    sys_dt = sys.dt
 
     if sys_dt == 0 or sys_dt is False:
-        return ContLTI(A=A, B=B, C=C, D=D)
+        return ss(A, B, C, D)
 
-    if sys_dt is True:
+    if sys_dt is True or sys_dt is None:
         if dt is None:
             raise ValueError(
                 "The python-control system has an unspecified discrete sample "
-                "time (dt=True). Provide dt= explicitly."
+                "time (dt=True or dt=None). Provide dt= explicitly."
             )
-        return DiscLTI(A=A, B=B, C=C, D=D, dt=jnp.asarray(float(dt)))
-
-    # sys_dt is a positive float
-    dt_val = float(dt) if dt is not None else float(sys_dt)
-    return DiscLTI(A=A, B=B, C=C, D=D, dt=jnp.asarray(dt_val))
+    period = sys_dt if dt is None else dt
+    raw_period = jnp.asarray(period)
+    if (
+        raw_period.ndim != 0
+        or jnp.iscomplexobj(raw_period)
+        or jnp.issubdtype(raw_period.dtype, jnp.bool_)
+    ):
+        raise ValueError("dt must be a real scalar")
+    if sys_dt is None and float(raw_period) == 0:
+        return ss(A, B, C, D)
+    return dss(A, B, C, D, period)
 
 
 def to_python_control(sys: ContLTI | DiscLTI) -> "control.StateSpace":
@@ -109,6 +118,9 @@ def to_python_control(sys: ContLTI | DiscLTI) -> "control.StateSpace":
 
     Returns:
         control.StateSpace: Equivalent python-control system.
+
+    Notes:
+        Copies arrays to the host. This bridge does not support JAX transforms.
 
     Raises:
         TypeError: If ``sys`` is not a ContLTI or DiscLTI.

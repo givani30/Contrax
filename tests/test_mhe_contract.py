@@ -189,3 +189,36 @@ def test_system_object_observations_include_terminal_feedthrough_and_time():
         cx.mhe_objective(
             sys, xs, jnp.ones((2, 1)), ys, xs[0], jnp.eye(1), jnp.eye(1), jnp.eye(1)
         )
+    continuous = cx.nonlinear_system(
+        lambda t, x, u: u,
+        output=lambda t, x, u: x + 2 * u + t,
+        state_dim=1,
+        input_dim=1,
+        output_dim=1,
+    )
+    sampled = cx.sample_system(continuous, 0.5, method="rk4", input_interpolation="foh")
+    # Integral of the linear input from 1 to 3 over half a second is 1.
+    # Terminal feedthrough uses u=3, not the previous interval's left u=1.
+    states = jnp.array([[1.0], [2.0]])
+    inputs = jnp.array([[[1.0], [3.0]]])
+    observations = jnp.array([[3.0], [8.5]])
+
+    def objective(x, u, y):
+        return cx.mhe_objective(
+            sampled, x, u, y, x[0], jnp.eye(1), jnp.eye(1), jnp.eye(1)
+        )
+
+    np.testing.assert_allclose(
+        jax.jit(objective)(states, inputs, observations), 0, atol=1e-12
+    )
+    np.testing.assert_allclose(
+        objective(states[:1], inputs[:0], states[:1]), 0, atol=1e-12
+    )
+    perturbed = states + 0.1
+    np.testing.assert_allclose(
+        jax.jacfwd(objective)(perturbed, inputs, observations),
+        jax.grad(objective)(perturbed, inputs, observations),
+        atol=1e-12,
+    )
+    with pytest.raises(ValueError, match="input structure"):
+        objective(states, inputs[:, 0], observations)

@@ -100,7 +100,7 @@ solvers and step-size controllers configure continuous integration.
 
 **Interoperability**
 `contrax.compat.python_control` — optional bidirectional conversion with
-[python-control](https://python-control.readthedocs.io/) (`pip install control`)
+[python-control](https://python-control.readthedocs.io/) (`uv add control`)
 
 Lyapunov solvers return a validated result bundle:
 

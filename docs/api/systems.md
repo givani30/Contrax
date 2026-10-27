@@ -304,3 +304,17 @@ they are not a formal certificate of passivity or robustness.
   end-to-end workflow
 
 ::: contrax.systems
+
+## Optional python-control conversion
+
+Install the optional bridge dependency with `uv add control`, then import
+`from_python_control` and `to_python_control` from `contrax.compat.python_control`.
+Both functions convert state-space realizations on the host; they do not support
+JAX transforms. Enable JAX x64 before conversion to retain source float64 arrays.
+Transfer functions must first be converted with `control.ss`.
+
+An explicitly continuous source stays continuous. Positive discrete periods are
+preserved or overridden by `dt=`. A source with `dt=True` requires a positive
+explicit period; `dt=None` also requires an override, with zero selecting a
+continuous model. Negative, nonfinite, complex and boolean overrides are invalid
+for these timebase selections.
