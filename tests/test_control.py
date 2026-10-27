@@ -70,6 +70,7 @@ def test_place_gain_matches_octave(disc_sys):
     """
     poles = _desired_poles()
     result = cx.place(disc_sys, poles)
+    assert result.successful
     K_expected = jnp.array([[15.0789, 27.1937, 17.7725]])
     assert jnp.allclose(result.K, K_expected, atol=0.1), (
         f"Pole placement mismatch.\n  got:      {result.K}\n  expected: {K_expected}"
@@ -80,6 +81,7 @@ def test_place_achieves_desired_poles(disc_sys):
     """Closed-loop eigenvalue magnitudes after place() must match targets."""
     poles = _desired_poles()
     result = cx.place(disc_sys, poles)
+    assert result.successful
     cl_sys = cx.feedback(disc_sys, result.K)
     actual = np.sort(np.abs(np.linalg.eigvals(np.array(cl_sys.A))))
     expected = np.sort(np.abs(poles))
@@ -110,11 +112,25 @@ def test_place_mimo_achieves_requested_real_poles():
     poles = jnp.array([0.5, 0.6])
 
     result = cx.place(sys, poles)
+    assert result.successful
     cl = cx.feedback(sys, result.K)
     actual = np.sort_complex(np.linalg.eigvals(np.array(cl.A)))
 
     assert result.K.shape == (2, 2)
     np.testing.assert_allclose(actual, np.sort_complex(np.array(poles)), atol=1e-8)
+    # Redundant inputs with a zero leading column must use the actual input
+    # subspace. For this double integrator, effective BK has last row [2,3].
+    redundant = cx.ss(
+        [[0.0, 1.0], [0.0, 0.0]],
+        [[0.0, 0.0, 0.0], [0.0, 1.0, 2.0]],
+        [[1.0, 0.0]],
+        [[0.0, 0.0, 0.0]],
+    )
+    design = cx.place(redundant, [-1.0, -2.0])
+    assert design.successful
+    np.testing.assert_allclose(
+        redundant.B @ design.K, [[0.0, 0.0], [2.0, 3.0]], atol=1e-10
+    )
 
 
 def test_place_continuous_double_integrator_achieves_desired_poles():
@@ -127,6 +143,7 @@ def test_place_continuous_double_integrator_achieves_desired_poles():
     poles = jnp.array([-1.0, -2.0])
 
     result = cx.place(sys, poles)
+    assert result.successful
     cl = cx.feedback(sys, result.K)
     actual = np.sort_complex(np.linalg.eigvals(np.array(cl.A)))
 
@@ -143,6 +160,7 @@ def test_place_continuous_mimo_complex_pair_uses_yt_path():
     poles = jnp.asarray(np.array([-0.2 + 1.2j, -0.2 - 1.2j, -1.5]))
 
     result = cx.place(sys, poles)
+    assert result.successful
     cl = cx.feedback(sys, result.K)
     actual = np.sort_complex(np.linalg.eigvals(np.array(cl.A)))
 
@@ -160,10 +178,73 @@ def test_place_clustered_real_poles_matches_targets():
     poles = jnp.array([0.7, 0.701, 0.702])
 
     result = cx.place(sys, poles)
+    assert result.successful
     cl = cx.feedback(sys, result.K)
     actual = np.sort_complex(np.linalg.eigvals(np.array(cl.A)))
 
     np.testing.assert_allclose(actual, np.sort_complex(np.array(poles)), atol=1e-8)
+
+
+def test_place_configuration_convergence_and_condition_diagnostics():
+    sys = cx.ss([[0.0, 1.0], [0.0, 0.0]], [[0.0], [1.0]], [[1.0, 0.0]], [[0.0]])
+    with pytest.raises(ValueError, match="conjugate"):
+        cx.place(sys, [-1 + 1j, -1 - 2j])
+    with pytest.raises(ValueError, match="KNV0"):
+        cx.place(
+            sys, [-1 + 1j, -1 - 1j], solver=cx.solvers.PolePlacement(method="KNV0")
+        )
+    condition = cx.place(
+        sys, [-1.0, -2.0], solver=cx.solvers.PolePlacement(condition_limit=1)
+    )
+    assert condition.status == cx.solvers.SolverStatus.numerical_failure
+    assert condition.assignment_error < 1e-8 and condition.eigenvector_condition > 1
+    uncontrollable = cx.ss([[1.0]], [[0.0]], [[1.0]], [[0.0]])
+    assert (
+        cx.place(uncontrollable, [-1.0]).status
+        == cx.solvers.SolverStatus.invalid_problem
+    )
+    multi = cx.ss(
+        jnp.diag(jnp.array([-1.0, -2.0, -3.0])),
+        [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
+        [[1.0, 0.0, 0.0]],
+        [[0.0, 0.0]],
+    )
+    limited = cx.place(
+        multi, [-4.0, -5.0, -6.0], solver=cx.solvers.PolePlacement(max_steps=0)
+    )
+    assert limited.status == cx.solvers.SolverStatus.max_steps_reached
+    assert limited.num_steps == 0 and limited.assignment_error < 1e-8
+    with pytest.raises(TypeError, match="design-time"):
+        jax.jit(lambda B: cx.place(cx.ss(sys.A, B, sys.C, sys.D), [-1.0, -2.0]).K)(
+            sys.B
+        )
+
+
+def test_place_fallback_is_bounded_and_independently_validated(monkeypatch):
+    import importlib
+
+    implementation = importlib.import_module("contrax._place")
+    sys = cx.ss([[0.0, 1.0], [0.0, 0.0]], [[0.0], [1.0]], [[1.0, 0.0]], [[0.0]])
+    monkeypatch.setattr(
+        implementation,
+        "_place_robust",
+        lambda *a, **k: (jnp.full((1, 2), jnp.nan), 1, jnp.inf),
+    )
+    recovered = cx.place(sys, [-1.0, -2.0])
+    assert recovered.successful and recovered.used_fallback
+    assert recovered.method == "ackermann" and recovered.assignment_error < 1e-8
+    disabled = cx.place(
+        sys, [-1.0, -2.0], solver=cx.solvers.PolePlacement(fallback_limit=0)
+    )
+    assert not disabled.successful and not disabled.used_fallback
+    monkeypatch.setattr(
+        implementation, "_place_ackermann", lambda *a: jnp.zeros((1, 2))
+    )
+    failed = cx.place(sys, [-1.0, -2.0])
+    assert failed.status == cx.solvers.SolverStatus.numerical_failure
+    assert failed.assignment_error > 1
+    with pytest.raises(RuntimeError, match="Pole assignment failed"):
+        cx.place(sys, [-1.0, -2.0], throw=True)
 
 
 # -- feedback ------------------------------------------------------------------

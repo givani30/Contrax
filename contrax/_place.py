@@ -1,402 +1,251 @@
-"""contrax._place — Pole placement internals and public place() function."""
+"""Validated design-time pole placement for real continuous/discrete LTI models."""
 
+import jax
 import jax.numpy as jnp
 import numpy as np
-from jax import Array
 from jax.typing import ArrayLike
 
+from contrax._pole_algorithms import (
+    _ctrb_matrix,
+    _order_complex_poles,
+    _place_ackermann,
+    _place_robust,
+)
+from contrax._precision import require_x64
 from contrax.core import ContLTI, DiscLTI
+from contrax.solvers import PolePlacement, SolverStatus
 from contrax.types import PlaceResult
 
 
-def _ctrb_matrix(A: Array, B: Array) -> Array:
-    """Controllability matrix [B, AB, A²B, ...]."""
-    n = A.shape[0]
-    cols = [B]
-    for _ in range(n - 1):
-        cols.append(A @ cols[-1])
-    return jnp.concatenate(cols, axis=1)
+def _assignment_error(actual, desired):
+    """Bottleneck bipartite matching; preserve multiplicities and conjugate pairs.
+
+    The gain/eigenvalue calculations remain native JAX. This combinatorial
+    design-time validation uses augmenting paths on the host, avoiding sorted
+    eigenvalue comparisons that can mismatch clustered conjugate pairs.
+    """
+    distances = np.asarray(jnp.abs(actual[:, None] - desired[None, :]))
+    if not np.all(np.isfinite(distances)):
+        return float("inf")
+    n = len(distances)
+
+    def feasible(radius):
+        row_match, col_match = [-1] * n, [-1] * n
+        for root in range(n):
+            queue, parent, visited = [root], [-1] * n, [False] * n
+            found = False
+            for row in queue:
+                for col in np.flatnonzero(distances[row] <= radius):
+                    if visited[col]:
+                        continue
+                    visited[col], parent[col] = True, row
+                    if col_match[col] == -1:
+                        while col != -1:
+                            row = parent[col]
+                            old = row_match[row]
+                            row_match[row], col_match[col] = col, row
+                            col = old
+                        found = True
+                        break
+                    queue.append(col_match[col])
+                if found:
+                    break
+            if not found:
+                return False
+        return True
+
+    radii = np.unique(distances)
+    lo, hi = 0, len(radii) - 1
+    while lo < hi:
+        middle = (lo + hi) // 2
+        if feasible(radii[middle]):
+            hi = middle
+        else:
+            lo = middle + 1
+    return float(radii[lo])
 
 
-def _order_complex_poles(poles: ArrayLike) -> Array:
-    poles_np = np.asarray(poles, dtype=complex)
-    reals = sorted(
-        [p for p in poles_np if np.isreal(p)],
-        key=lambda z: (float(np.real(z)), float(np.imag(z))),
-    )
-    positive_imag = sorted(
-        [p for p in poles_np if np.imag(p) > 0],
-        key=lambda z: (float(np.real(z)), float(np.imag(z))),
-    )
-    ordered = list(reals)
-    for pole in positive_imag:
-        ordered.extend([pole, np.conj(pole)])
-    if len(ordered) != len(poles_np):
-        raise ValueError("Poles must be real or come in conjugate pairs.")
-    return jnp.asarray(np.array(ordered))
-
-
-def _place_knv0_update(ker_pole: list[Array], transfer_matrix: Array, j: int) -> Array:
-    transfer_matrix_not_j = jnp.delete(transfer_matrix, j, axis=1)
-    Q, _ = jnp.linalg.qr(transfer_matrix_not_j, mode="complete")
-    yj = ker_pole[j] @ (ker_pole[j].T @ Q[:, -1:])
-    if float(jnp.linalg.norm(yj)) > 1e-12:
-        transfer_matrix = transfer_matrix.at[:, j].set((yj / jnp.linalg.norm(yj))[:, 0])
-    return transfer_matrix
-
-
-def _place_yt_real_update(
-    ker_pole: list[Array], Q: Array, transfer_matrix: Array, i: int, j: int
-) -> Array:
-    u = Q[:, -2:]
-    u0 = u[:, :1]
-    u1 = u[:, 1:]
-    m = ker_pole[i].T @ (u0 @ u1.T - u1 @ u0.T) @ ker_pole[j]
-    um, sm, vmh = jnp.linalg.svd(m, full_matrices=True)
-    mu1 = um[:, :1]
-    mu2 = um[:, 1:2]
-    nu1 = vmh.conj().T[:, :1]
-    nu2 = vmh.conj().T[:, 1:2]
-
-    tm_ij = jnp.vstack([transfer_matrix[:, i : i + 1], transfer_matrix[:, j : j + 1]])
-    if abs(float(sm[0] - sm[1])) > 1e-12:
-        ker_mu_nu = jnp.vstack([ker_pole[i] @ mu1, ker_pole[j] @ nu1])
-    else:
-        top = jnp.hstack([ker_pole[i], jnp.zeros_like(ker_pole[i])])
-        bot = jnp.hstack([jnp.zeros_like(ker_pole[j]), ker_pole[j]])
-        ker_ij = jnp.vstack([top, bot])
-        mu_nu = jnp.vstack([jnp.hstack([mu1, mu2]), jnp.hstack([nu1, nu2])])
-        ker_mu_nu = ker_ij @ mu_nu
-
-    transfer_matrix_ij = ker_mu_nu @ (ker_mu_nu.T @ tm_ij)
-    n = transfer_matrix.shape[0]
-    if float(jnp.linalg.norm(transfer_matrix_ij)) > 1e-12:
-        transfer_matrix_ij = (
-            jnp.sqrt(jnp.asarray(2.0, dtype=transfer_matrix.dtype))
-            * transfer_matrix_ij
-            / jnp.linalg.norm(transfer_matrix_ij)
+def _assess(A, B, K, desired, solver):
+    closed = A - B @ K
+    if not bool(jnp.all(jnp.isfinite(K)) & jnp.all(jnp.isfinite(closed))):
+        return (
+            jnp.full(A.shape[0], jnp.nan, dtype=jnp.complex128),
+            float("inf"),
+            float("inf"),
+            False,
         )
-        transfer_matrix = transfer_matrix.at[:, i].set(transfer_matrix_ij[:n, 0])
-        transfer_matrix = transfer_matrix.at[:, j].set(transfer_matrix_ij[n:, 0])
-    else:
-        transfer_matrix = transfer_matrix.at[:, i].set(ker_mu_nu[:n, 0])
-        transfer_matrix = transfer_matrix.at[:, j].set(ker_mu_nu[n:, 0])
-    return transfer_matrix
-
-
-def _place_yt_complex_update(
-    ker_pole: list[Array], Q: Array, transfer_matrix: Array, i: int, j: int
-) -> Array:
-    sqrt2 = jnp.sqrt(jnp.asarray(2.0, dtype=transfer_matrix.dtype))
-    ur = sqrt2 * Q[:, -2:-1]
-    ui = sqrt2 * Q[:, -1:]
-    u = ur + 1j * ui
-    ker = ker_pole[i]
-    m = ker.conj().T @ (u @ u.conj().T - u.conj() @ u.T) @ ker
-    evals, evecs = jnp.linalg.eig(m)
-    order = jnp.argsort(jnp.abs(evals))
-    mu1 = evecs[:, order[-1] : order[-1] + 1]
-    mu2 = evecs[:, order[-2] : order[-2] + 1]
-    tm_complex = transfer_matrix[:, i : i + 1] + 1j * transfer_matrix[:, j : j + 1]
-    if abs(float(jnp.abs(evals[order[-1]]) - jnp.abs(evals[order[-2]]))) > 1e-12:
-        ker_mu = ker @ mu1
-    else:
-        ker_mu = ker @ jnp.hstack([mu1, mu2])
-    transfer_ij = ker_mu @ (ker_mu.conj().T @ tm_complex)
-    if float(jnp.linalg.norm(transfer_ij)) > 1e-12:
-        transfer_ij = transfer_ij / jnp.linalg.norm(transfer_ij)
-        transfer_matrix = transfer_matrix.at[:, i].set(jnp.real(transfer_ij[:, 0]))
-        transfer_matrix = transfer_matrix.at[:, j].set(jnp.imag(transfer_ij[:, 0]))
-    else:
-        transfer_matrix = transfer_matrix.at[:, i].set(jnp.real(ker_mu[:, 0]))
-        transfer_matrix = transfer_matrix.at[:, j].set(jnp.imag(ker_mu[:, 0]))
-    return transfer_matrix
-
-
-def _place_yt_update_order(poles: Array) -> np.ndarray:
-    poles_np = np.asarray(poles)
-    nb_real = poles_np[np.isreal(poles_np)].shape[0]
-    hnb = nb_real // 2
-    if nb_real > 0:
-        update_order = [[nb_real], [1]]
-    else:
-        update_order = [[], []]
-    r_comp = np.arange(nb_real + 1, len(poles_np) + 1, 2)
-    r_p = np.arange(1, hnb + nb_real % 2)
-    update_order[0].extend(2 * r_p)
-    update_order[1].extend(2 * r_p + 1)
-    update_order[0].extend(r_comp)
-    update_order[1].extend(r_comp + 1)
-    r_p = np.arange(1, hnb + 1)
-    update_order[0].extend(2 * r_p - 1)
-    update_order[1].extend(2 * r_p)
-    if hnb == 0 and np.isreal(poles_np[0]):
-        update_order[0].append(1)
-        update_order[1].append(1)
-    update_order[0].extend(r_comp)
-    update_order[1].extend(r_comp + 1)
-    r_j = np.arange(2, hnb + nb_real % 2)
-    for j in r_j:
-        for i in range(1, hnb + 1):
-            update_order[0].append(i)
-            update_order[1].append(i + j)
-    if hnb == 0 and np.isreal(poles_np[0]):
-        update_order[0].append(1)
-        update_order[1].append(1)
-    update_order[0].extend(r_comp)
-    update_order[1].extend(r_comp + 1)
-    r_j = np.arange(2, hnb + nb_real % 2)
-    for j in r_j:
-        for i in range(hnb + 1, nb_real + 1):
-            idx_1 = i + j
-            if idx_1 > nb_real:
-                idx_1 = i + j - nb_real
-            update_order[0].append(i)
-            update_order[1].append(idx_1)
-    if hnb == 0 and np.isreal(poles_np[0]):
-        update_order[0].append(1)
-        update_order[1].append(1)
-    update_order[0].extend(r_comp)
-    update_order[1].extend(r_comp + 1)
-    for i in range(1, hnb + 1):
-        update_order[0].append(i)
-        update_order[1].append(i + hnb)
-    if hnb == 0 and np.isreal(poles_np[0]):
-        update_order[0].append(1)
-        update_order[1].append(1)
-    update_order[0].extend(r_comp)
-    update_order[1].extend(r_comp + 1)
-    return np.array(update_order).T - 1
-
-
-def _place_ackermann(A: Array, B: Array, poles: ArrayLike) -> Array:
-    n = A.shape[0]
-    poles_np = np.asarray(poles)
-    coeffs = np.poly(poles_np)
-    eye = jnp.eye(n, dtype=A.dtype)
-    p_A = float(coeffs[0]) * eye
-    for c in coeffs[1:]:
-        p_A = p_A @ A + float(c) * eye
-    C_ctrb = _ctrb_matrix(A, B)
-    e_n = jnp.zeros(n, dtype=A.dtype).at[-1].set(1.0)
-    x = jnp.linalg.solve(C_ctrb.T, e_n)
-    L = x @ p_A
-    return L.reshape(1, n)
-
-
-def _place_robust(
-    A: Array,
-    B: Array,
-    poles: ArrayLike,
-    *,
-    method: str,
-    rtol: float,
-    maxiter: int,
-) -> Array:
-    poles = _order_complex_poles(poles)
-    if A.shape[0] != A.shape[1]:
-        raise ValueError("A must be square.")
-    if len(poles) != A.shape[0]:
-        raise ValueError("place() requires exactly n poles.")
-
-    rankB = int(jnp.linalg.matrix_rank(B))
-    poles_np = np.asarray(poles)
-    for pole in poles_np:
-        if np.sum(np.isclose(poles_np, pole)) > rankB:
-            raise ValueError(
-                "at least one requested pole is repeated more than rank(B) times"
-            )
-    if method == "KNV0" and not np.all(np.isreal(poles_np)):
-        raise ValueError("Complex poles are not supported by KNV0.")
-
-    U, Z = jnp.linalg.qr(B, mode="complete")
-    u0 = U[:, :rankB]
-    u1 = U[:, rankB:]
-    Z = Z[:rankB, :]
-
-    if B.shape[0] == rankB:
-        diag_poles = jnp.zeros(A.shape, dtype=A.dtype)
-        idx = 0
-        while idx < poles.shape[0]:
-            pole = poles[idx]
-            diag_poles = diag_poles.at[idx, idx].set(jnp.real(pole))
-            if not bool(jnp.isreal(pole)):
-                diag_poles = diag_poles.at[idx, idx + 1].set(-jnp.imag(pole))
-                diag_poles = diag_poles.at[idx + 1, idx + 1].set(jnp.real(pole))
-                diag_poles = diag_poles.at[idx + 1, idx].set(jnp.imag(pole))
-                idx += 1
-            idx += 1
-        gain_matrix, *_ = jnp.linalg.lstsq(B, diag_poles - A, rcond=None)
-        return -jnp.real(gain_matrix)
-
-    ker_pole: list[Array] = []
-    transfer_cols: list[Array] = []
-    skip_conjugate = False
-    n = B.shape[0]
-    identity = jnp.eye(n, dtype=A.dtype)
-
-    for j in range(n):
-        if skip_conjugate:
-            skip_conjugate = False
-            continue
-        pole_space_j = (u1.T @ (A - poles[j] * identity)).T
-        Q, _ = jnp.linalg.qr(pole_space_j, mode="complete")
-        ker_j = Q[:, pole_space_j.shape[1] :]
-        transfer_j = jnp.sum(ker_j, axis=1, keepdims=True)
-        transfer_j = transfer_j / jnp.linalg.norm(transfer_j)
-        if not bool(jnp.isreal(poles[j])):
-            transfer_cols.extend(
-                [jnp.real(transfer_j[:, 0]), jnp.imag(transfer_j[:, 0])]
-            )
-            ker_pole.extend([ker_j, ker_j])
-            skip_conjugate = True
-        else:
-            transfer_cols.append(transfer_j[:, 0])
-            ker_pole.append(ker_j)
-
-    transfer_matrix = jnp.stack(transfer_cols, axis=1)
-
-    if rankB > 1:
-        if method == "KNV0":
-            for _ in range(maxiter):
-                det_before = max(
-                    float(jnp.abs(jnp.linalg.det(transfer_matrix))),
-                    float(np.sqrt(np.spacing(1))),
-                )
-                for j in range(len(poles)):
-                    transfer_matrix = _place_knv0_update(ker_pole, transfer_matrix, j)
-                det_after = max(
-                    float(jnp.abs(jnp.linalg.det(transfer_matrix))),
-                    float(np.sqrt(np.spacing(1))),
-                )
-                cur_rtol = abs((det_after - det_before) / det_after)
-                if cur_rtol < rtol:
-                    break
-        elif method == "YT":
-            update_order = _place_yt_update_order(poles)
-            for _ in range(maxiter):
-                det_before = max(
-                    float(jnp.abs(jnp.linalg.det(transfer_matrix))),
-                    float(np.sqrt(np.spacing(1))),
-                )
-                for i, j in update_order:
-                    if i == j:
-                        transfer_matrix = _place_knv0_update(
-                            ker_pole, transfer_matrix, i
-                        )
-                    else:
-                        tm_not = jnp.delete(transfer_matrix, jnp.array([i, j]), axis=1)
-                        Q, _ = jnp.linalg.qr(tm_not, mode="complete")
-                        if np.isreal(np.asarray(poles[i])):
-                            transfer_matrix = _place_yt_real_update(
-                                ker_pole, Q, transfer_matrix, i, j
-                            )
-                        else:
-                            transfer_matrix = _place_yt_complex_update(
-                                ker_pole, Q, transfer_matrix, i, j
-                            )
-                det_after = max(
-                    float(jnp.abs(jnp.linalg.det(transfer_matrix))),
-                    float(np.sqrt(np.spacing(1))),
-                )
-                cur_rtol = abs((det_after - det_before) / det_after)
-                if cur_rtol < rtol:
-                    break
-        else:
-            raise ValueError(f"Unknown pole-placement method: {method!r}")
-
-    transfer_complex = transfer_matrix.astype(jnp.complex128)
-    idx = 0
-    while idx < poles.shape[0] - 1:
-        if not bool(jnp.isreal(poles[idx])):
-            rel = transfer_complex[:, idx].copy()
-            img = transfer_complex[:, idx + 1]
-            transfer_complex = transfer_complex.at[:, idx].set(rel - 1j * img)
-            transfer_complex = transfer_complex.at[:, idx + 1].set(rel + 1j * img)
-            idx += 1
-        idx += 1
-
-    m = jnp.linalg.solve(transfer_complex.T, (jnp.diag(poles) @ transfer_complex.T)).T
-    gain_matrix = jnp.linalg.solve(Z, u0.T @ (m - A))
-    return -jnp.real(gain_matrix)
-
-
-# ── pole placement ─────────────────────────────────────────────────────────
-# Uses Ackermann's formula for SISO systems (m=1).
-# Reference: Ackermann (1972), "Der Entwurf linearer Regelungssysteme im
-# Zustandsraum", Regelungstechnik 20(7), pp. 297-300.
-# Note: numerically fragile for n > 5. A QR-based Sylvester equation mapping is
-# the next likely implementation path for arbitrary n and MIMO.
-# Reference: Kautsky, Nichols & Van Dooren (1985), "Robust Pole
-# Assignment in Linear State Feedback", Int. J. Control 41(5), pp. 1129-1155.
+    actual, vectors = jnp.linalg.eig(closed)
+    error = _assignment_error(actual, desired)
+    condition = float(jnp.linalg.cond(vectors))
+    tolerance = solver.assignment_atol + solver.assignment_rtol * float(
+        jnp.max(jnp.abs(desired))
+    )
+    valid = (
+        bool(jnp.all(jnp.isfinite(actual)))
+        and error <= tolerance
+        and condition <= solver.condition_limit
+    )
+    return actual, error, condition, valid
 
 
 def place(
     sys: DiscLTI | ContLTI,
     poles: ArrayLike,
     *,
-    method: str | None = None,
-    rtol: float = 1e-3,
-    maxiter: int = 30,
+    solver: PolePlacement | None = None,
+    throw: bool = False,
 ) -> PlaceResult:
-    """Place closed-loop poles for a state-space system.
+    """Assign real/conjugate-paired poles and validate the achieved feedback.
 
-    Uses a JAX-native robust assignment path based on KNV0 for real-pole cases
-    and YT for complex-pole cases. Both methods are design-time helpers rather
-    than traced differentiable primitives.
+    Uses native JAX KNV0 (real poles) or YT (real or complex pairs) linear
+    algebra with design-time rank decisions and convergence control. Input
+    subspaces use SVD so dependent and redundant input columns are supported.
+    Small SISO failures may try bounded Ackermann fallback; every candidate
+    must meet assignment and conditioning tolerances.
 
-    If `method` is left as `None`, Contrax selects `KNV0` for all-real pole
-    sets and `YT` when any complex-conjugate pair is present. For single-input
-    systems, Ackermann remains available as a fallback if the robust path
-    fails.
+    Requires float64 mode; calculations promote real model matrices to float64.
+    Call outside jit, vmap and differentiation. Structural decisions and
+    host-side matching do not have a traced or differentiable contract. Returned
+    diagnostics use the same JAX status codes as other numerical solvers.
 
     Args:
-        sys: Continuous or discrete-time system.
-        poles: Desired closed-loop pole locations. Shape: `(n,)`.
-        method: Optional robust assignment method. Supported values are
-            `"KNV0"` and `"YT"`. When omitted, Contrax chooses based on
-            whether the requested poles are all real.
-        rtol: Determinant-improvement stopping tolerance for the robust update.
-        maxiter: Maximum robust-assignment iterations.
+        sys: Continuous or discrete real LTI model, with n>0 and m>0.
+        poles: Finite requested poles, shape (n,), real or conjugate-paired.
+        solver: PolePlacement method, stopping/acceptance tolerances and limits.
+            Multiplicity beyond rank(B) requires bounded SISO fallback; robust
+            KNV0/YT updates do not support that configuration.
+        throw: Raise on failed assignment, convergence or conditioning checks.
 
     Returns:
-        PlaceResult: Result with `.K` (state-feedback gain, shape `(m, n)`)
-        and `.poles` (achieved closed-loop eigenvalues). Supports tuple
-        unpacking: ``K, poles = cx.place(...)``.
+        PlaceResult: K, achieved poles, status, matching error, conditioning,
+        iterations and selected method. Unpacks as K, poles. A failed result
+        may contain a finite candidate for inspection; check successful.
 
     Examples:
         >>> import jax
         >>> jax.config.update("jax_enable_x64", True)
-        >>> import jax.numpy as jnp
         >>> import contrax as cx
-        >>> sys = cx.dss(
-        ...     jnp.array([[1.0, 0.1], [0.0, 0.9]]),
-        ...     jnp.array([[0.0], [1.0]]),
-        ...     jnp.eye(2),
-        ...     jnp.zeros((2, 1)),
-        ...     dt=0.1,
-        ... )
-        >>> result = cx.place(sys, jnp.array([0.6, 0.7]))
-        >>> K = result.K  # or: K, achieved_poles = cx.place(...)
+        >>> sys = cx.ss([[0., 1.], [0., 0.]], [[0.], [1.]], [[1., 0.]], [[0.]])
+        >>> result = cx.place(sys, [-1., -2.])
+        >>> bool(result.successful)
+        True
     """
-    A, B = sys.A, sys.B
-    poles_ordered = _order_complex_poles(poles)
-    has_complex = bool(np.any(np.imag(np.asarray(poles_ordered)) != 0.0))
-    chosen_method = method or ("YT" if has_complex else "KNV0")
-
+    require_x64("place")
+    solver = PolePlacement() if solver is None else solver
+    if not isinstance(solver, PolePlacement):
+        raise TypeError("place solver must be contrax.solvers.PolePlacement")
+    if not isinstance(sys, (ContLTI, DiscLTI)):
+        raise TypeError("place requires a continuous or discrete LTI model")
+    if jnp.iscomplexobj(sys.A) or jnp.iscomplexobj(sys.B):
+        raise ValueError("place requires real model matrices")
     try:
-        K = _place_robust(
-            A,
-            B,
-            poles_ordered,
-            method=chosen_method,
-            rtol=rtol,
-            maxiter=maxiter,
+        np.asarray(sys.A)
+        np.asarray(sys.B)
+        requested = np.asarray(poles, dtype=complex)
+    except jax.errors.TracerArrayConversionError as error:
+        raise TypeError(
+            "place is design-time; call it outside JAX transforms"
+        ) from error
+    A, B = jnp.asarray(sys.A, dtype=jnp.float64), jnp.asarray(sys.B, dtype=jnp.float64)
+    if A.ndim != 2 or A.shape[0] == 0 or A.shape[1] != A.shape[0]:
+        raise ValueError("A must be a nonempty square matrix")
+    n = A.shape[0]
+    if B.ndim != 2 or B.shape[0] != n or B.shape[1] == 0:
+        raise ValueError("B must have shape (n, m), m>0")
+    if requested.ndim != 1 or requested.shape[0] != n:
+        raise ValueError("place requires exactly n requested poles")
+    desired = _order_complex_poles(requested)
+    complex_poles = bool(jnp.any(jnp.imag(desired) != 0))
+    method = (
+        ("YT" if complex_poles else "KNV0")
+        if solver.method == "auto"
+        else solver.method
+    )
+    if method == "KNV0" and complex_poles:
+        raise ValueError("KNV0 does not support complex poles; select YT or auto")
+    cc = float("inf")
+
+    def result(
+        K, actual, error, ec, status, steps=0, improvement=float("inf"), fallback=False
+    ):
+        answer = PlaceResult(
+            K=K,
+            poles=actual,
+            status=jnp.asarray(status, dtype=jnp.int32),
+            assignment_error=jnp.asarray(error),
+            controllability_condition=jnp.asarray(cc),
+            eigenvector_condition=jnp.asarray(ec),
+            num_steps=jnp.asarray(steps, dtype=jnp.int32),
+            relative_improvement=jnp.asarray(improvement),
+            used_fallback=jnp.asarray(fallback),
+            method="ackermann" if fallback else method,
         )
-    except Exception:
-        if B.shape[1] == 1:
-            K = _place_ackermann(A, B, poles_ordered)
-        else:
-            raise
-    achieved_poles = jnp.linalg.eigvals(A - B @ K)
-    return PlaceResult(K=K, poles=achieved_poles)
+        if throw and status != SolverStatus.successful:
+            raise RuntimeError(
+                "Pole assignment failed; inspect assignment_error and conditioning"
+            )
+        return answer
+
+    def failed(status):
+        return result(
+            jnp.full((B.shape[1], n), jnp.nan),
+            jnp.full(n, jnp.nan, dtype=jnp.complex128),
+            float("inf"),
+            float("inf"),
+            status,
+        )
+
+    if not bool(jnp.all(jnp.isfinite(A)) & jnp.all(jnp.isfinite(B))):
+        return failed(SolverStatus.invalid_problem)
+    controllability = _ctrb_matrix(A, B)
+    if not bool(jnp.all(jnp.isfinite(controllability))):
+        return failed(SolverStatus.numerical_failure)
+    singular = jnp.linalg.svd(controllability, compute_uv=False)
+    if not bool(jnp.all(jnp.isfinite(singular))):
+        return failed(SolverStatus.numerical_failure)
+    cc = float(jnp.where(singular[-1] > 0, singular[0] / singular[-1], jnp.inf))
+    rank = int(
+        jnp.sum(
+            singular > singular[0] * max(controllability.shape) * jnp.finfo(A.dtype).eps
+        )
+    )
+    if rank < n:
+        return failed(SolverStatus.invalid_problem)
+    if cc > solver.condition_limit:
+        return failed(SolverStatus.numerical_failure)
+    rankB = int(jnp.linalg.matrix_rank(B))
+    repeated = (
+        max(int(np.sum(np.asarray(desired) == pole)) for pole in np.asarray(desired))
+        > rankB
+    )
+    allow_fallback = B.shape[1] == 1 and n <= solver.fallback_limit
+    if repeated and not allow_fallback:
+        raise ValueError("Requested multiplicity exceeds rank(B) for KNV0/YT")
+
+    fallback = repeated
+    if fallback:
+        K, steps, improvement = _place_ackermann(A, B, desired), 0, 0.0
+    else:
+        K, steps, improvement = _place_robust(
+            A, B, desired, method=method, rtol=solver.rtol, maxiter=solver.max_steps
+        )
+    actual, error, ec, good = _assess(A, B, K, desired, solver)
+    if not good and allow_fallback and not fallback:
+        alternate = _place_ackermann(A, B, desired)
+        ap, ae, ac, accepted = _assess(A, B, alternate, desired, solver)
+        if accepted or (
+            not bool(jnp.all(jnp.isfinite(K)))
+            and bool(jnp.all(jnp.isfinite(alternate)))
+        ):
+            K, actual, error, ec, good = alternate, ap, ae, ac, accepted
+            steps, improvement, fallback = 0, 0.0, True
+    status = (
+        (
+            SolverStatus.successful
+            if improvement < solver.rtol
+            else SolverStatus.max_steps_reached
+        )
+        if good
+        else SolverStatus.numerical_failure
+    )
+    return result(K, actual, error, ec, status, steps, improvement, fallback)

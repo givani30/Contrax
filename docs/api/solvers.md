@@ -62,4 +62,12 @@ design = cx.lqr(sys, Q, R, solver=cx.solvers.DARE(max_steps=64))
 fallback. See [Analysis](analysis.md) and [Control](control.md) for equation
 assumptions, residual criteria and transform behavior.
 
+`PolePlacement` configures the design-time KNV0/YT method, update limit,
+determinant-improvement tolerance, achieved-pole tolerances and conditioning
+limit. `fallback_limit=8` bounds SISO Ackermann fallback; zero disables it.
+Pole matching preserves multiplicities and conjugate pairs. Configuration
+errors raise immediately; convergence and numerical failures return status
+diagnostics unless `throw=True`. Read the [control reference](control.md) for
+its float64 and transform contract.
+
 ::: contrax.solvers

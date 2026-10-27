@@ -35,10 +35,9 @@ def lqr(
     Dispatches to `dare()` for discrete systems and `care()` for continuous
     systems, returning a unified [LQRResult][contrax.types.LQRResult].
 
-    The discrete path is more benchmarked than the continuous path, but both
-    routes are first-class public solvers. Type dispatch happens outside traced
-    runtime values, so `jit` works as long as the system type is fixed at trace
-    time.
+    Both routes validate the equation residual and closed-loop stability and
+    support implicit JVP/VJP differentiation. Type dispatch occurs at trace time;
+    the system's time domain must stay fixed within a compiled workflow.
 
     Args:
         sys: [DiscLTI][contrax.systems.DiscLTI] or

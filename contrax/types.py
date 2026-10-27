@@ -116,12 +116,33 @@ class PlaceResult(eqx.Module):
     Attributes:
         K: State-feedback gain. Shape: `(m, n)`.
         poles: Achieved closed-loop eigenvalues. Shape: `(n,)`.
+        status: JAX scalar SolverStatus code.
+        successful: Whether assignment, conditioning and convergence passed.
+        assignment_error: Smallest maximum matching distance to requested poles.
+        controllability_condition: Condition estimate of the controllability matrix.
+        eigenvector_condition: Condition estimate of the achieved eigenvector basis.
+        num_steps: Robust update sweeps performed; zero for direct/fallback solves.
+        relative_improvement: Last relative determinant-improvement measure.
+        used_fallback: Whether K came from the bounded Ackermann fallback.
+        method: Selected KNV0, YT or ackermann method, as static metadata.
 
     Supports tuple unpacking: ``K, poles = cx.place(...)``
     """
 
     K: Array
     poles: Array
+    status: Array
+    assignment_error: Array
+    controllability_condition: Array
+    eigenvector_condition: Array
+    num_steps: Array
+    relative_improvement: Array
+    used_fallback: Array
+    method: str = eqx.field(static=True)
+
+    @property
+    def successful(self) -> Array:
+        return self.status == 0
 
     def __iter__(self):
         return iter((self.K, self.poles))

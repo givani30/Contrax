@@ -118,7 +118,7 @@ contracts.
 
 - **`dare`** — structured doubling with implicit JVP/VJP, scale-aware residual and stability checks.
 - **`care`** — Hamiltonian stable-subspace solve with accepted Newton corrections and implicit JVP/VJP. Closely separated subspaces can limit accuracy.
-- **`place`** — JAX-native KNV0/YT-style robust pole placement; Ackermann retained as SISO fallback only.
+- **`place`** — design-time KNV0/YT pole placement with achieved-assignment and conditioning checks, solver configuration, and bounded SISO fallback.
 - **`ekf` / `ukf` / `rts` / `uks`** — differentiable nonlinear filtering and smoothing with full JAX transform support.
 - **`mhe`** — LBFGS-backed fixed-window MHE. Useful optimization-based estimation primitive; not a full NLP framework.
 

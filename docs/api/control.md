@@ -58,6 +58,9 @@ closed_loop = cx.state_feedback(sys, result.K)
 `place()` returns a [`PlaceResult`](types.md#contrax.types.PlaceResult) with
 `.K` (state-feedback gain, shape `(m, n)`) and `.poles` (achieved closed-loop
 eigenvalues). It supports tuple unpacking: ``K, poles = cx.place(...)``.
+Inspect `.status`, `.successful`, `.assignment_error`, conditioning estimates
+and `.num_steps` before using a candidate. A finite gain can still fail
+acceptance checks.
 
 For `lqi()`, the returned gain acts on the augmented state `[x; z]`, where `z`
 is the integral state added by `augment_integrator()`.
@@ -194,7 +197,26 @@ accepts the DARE configuration for its dual equation.
 Nearly inseparable Hamiltonian subspaces can make CARE inaccurate. Newton
 refinement cannot create a stabilizing subspace when one is absent. Read
 [Riccati solvers](../theory/riccati-solvers.md) for assumptions and conditioning.
-Pole placement retains its separate design-time contract.
+Pole placement uses `solver=cx.solvers.PolePlacement(...)` for method,
+convergence, assignment and conditioning limits. `auto` selects KNV0 for real
+poles and YT for conjugate pairs. SVD input subspaces support redundant or
+dependent input columns. A bounded small-SISO Ackermann fallback must pass
+the same achieved-assignment and conditioning checks as the robust route.
+No fallback overrides an invalid method or malformed conjugate-pole request.
+
+```python
+placement = cx.place(sys, [0.7, 0.8],
+                     solver=cx.solvers.PolePlacement(method="YT", max_steps=40))
+assert placement.successful
+```
+
+This is float64, design-time functionality: call it outside `jit`, `vmap` and
+differentiation. Model matrices are promoted to float64 with explicit float64
+mode enabled. Numerically uncontrollable models report `invalid_problem`;
+assignment or conditioning breakdown reports `numerical_failure`. Exhausting
+robust update sweeps reports `max_steps_reached` when a finite, otherwise valid
+candidate remains. `throw=False` returns diagnostics and `throw=True` raises.
+Inputs and incompatible configurations are validated before numerical work.
 
 ## Transform Behavior
 

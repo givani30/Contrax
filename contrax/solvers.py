@@ -70,6 +70,7 @@ __all__ = [
     "Kalman",
     "SteadyStateKalman",
     "InformationKalman",
+    "PolePlacement",
     "EKF",
     "UKF",
     "SolverStatus",
@@ -204,3 +205,40 @@ class UKF(eqx.Module):
             raise ValueError("UKF scaling parameters must be finite")
         if self.alpha <= 0:
             raise ValueError("UKF alpha must be positive")
+
+
+class PolePlacement(eqx.Module):
+    """Design-time robust pole assignment and acceptance tolerances.
+
+    Attributes:
+        method: auto chooses KNV0 for real poles and YT for complex pairs.
+            Explicit KNV0 and YT selections are also accepted.
+        rtol: Relative determinant-improvement convergence tolerance.
+        max_steps: Maximum robust eigenvector-update sweeps.
+        assignment_rtol: Scale-aware achieved-pole tolerance.
+        assignment_atol: Absolute achieved-pole tolerance.
+        condition_limit: Maximum controllability/eigenvector condition estimate.
+        fallback_limit: Largest SISO dimension allowed for Ackermann fallback;
+            zero disables fallback. Every fallback is validated independently.
+    """
+
+    method: str = eqx.field(static=True, default="auto")
+    rtol: float = eqx.field(static=True, default=1e-3)
+    max_steps: int = eqx.field(static=True, default=30)
+    assignment_rtol: float = eqx.field(static=True, default=1e-6)
+    assignment_atol: float = eqx.field(static=True, default=1e-8)
+    condition_limit: float = eqx.field(static=True, default=1e12)
+    fallback_limit: int = eqx.field(static=True, default=8)
+
+    def __check_init__(self):
+        if self.method not in ("auto", "KNV0", "YT"):
+            raise ValueError("PolePlacement method must be auto, KNV0, or YT")
+        Lyapunov(
+            rtol=self.rtol,
+            atol=0,
+            max_steps=self.max_steps,
+            dense_limit=self.fallback_limit,
+        )
+        Lyapunov(rtol=self.assignment_rtol, atol=self.assignment_atol)
+        if not math.isfinite(self.condition_limit) or self.condition_limit < 1:
+            raise ValueError("condition_limit must be finite and at least one")
