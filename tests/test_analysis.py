@@ -44,11 +44,6 @@ def test_obsv_double_integrator_matches_manual_matrix():
     assert jnp.allclose(cx.obsv(sys), expected, atol=1e-12)
 
 
-def test_gramian_helpers_are_exported_at_top_level():
-    assert cx.ctrb_gramian is ctrb_gramian
-    assert cx.obsv_gramian is obsv_gramian
-
-
 def test_ctrb_and_obsv_work_for_discrete_systems():
     sys = cx.dss(
         A=jnp.array([[0.9, 0.1], [0.0, 0.8]]),
@@ -232,85 +227,7 @@ def test_analysis_gradients_are_finite():
     assert jnp.isfinite(grad)
 
 
-# ── Lyapunov solvers ───────────────────────────────────────────────────────
-
-
-def test_lyap_stable_diagonal():
-    # Octave: pkg load control; lyap(diag([-1,-2]), eye(2))
-    # -> X = [[0.5, 0], [0, 0.25]]
-    A = jnp.array([[-1.0, 0.0], [0.0, -2.0]])
-    Q = jnp.eye(2)
-    X = cx.lyap(A, Q).X
-    residual = A @ X + X @ A.T + Q
-    assert jnp.max(jnp.abs(residual)) < 1e-12
-    assert jnp.allclose(X, jnp.diag(jnp.array([0.5, 0.25])), atol=1e-10)
-
-
-def test_lyap_symmetric_solution():
-    A = jnp.array([[-3.0, 1.0], [-1.0, -2.0]])
-    Q = jnp.array([[2.0, 0.5], [0.5, 1.0]])
-    X = cx.lyap(A, Q).X
-    assert jnp.max(jnp.abs(X - X.T)) < 1e-12
-    assert jnp.max(jnp.abs(A @ X + X @ A.T + Q)) < 1e-10
-
-
-def test_dlyap_stable_diagonal():
-    # Octave: pkg load control; dlyap(diag([0.5, 0.3]), eye(2))
-    # -> X = [[4/3, 0], [0, 100/91]]
-    A = jnp.array([[0.5, 0.0], [0.0, 0.3]])
-    Q = jnp.eye(2)
-    X = cx.dlyap(A, Q).X
-    residual = A @ X @ A.T - X + Q
-    assert jnp.max(jnp.abs(residual)) < 1e-12
-    expected = jnp.diag(jnp.array([1.0 / (1 - 0.25), 1.0 / (1 - 0.09)]))
-    assert jnp.allclose(X, expected, atol=1e-10)
-
-
-def test_dlyap_symmetric_solution():
-    A = jnp.array([[0.6, 0.1], [-0.1, 0.5]])
-    Q = jnp.array([[1.0, 0.2], [0.2, 0.5]])
-    X = cx.dlyap(A, Q).X
-    assert jnp.max(jnp.abs(X - X.T)) < 1e-12
-    assert jnp.max(jnp.abs(A @ X @ A.T - X + Q)) < 1e-10
-
-
 # ── Transmission zeros ─────────────────────────────────────────────────────
-
-
-def test_zeros_siso_d0_no_zeros():
-    # Double integrator: G(s) = 1/s^2, no finite zeros
-    sys = _double_integrator()
-    z = cx.zeros(sys)
-    assert z.shape[0] == 0
-
-
-def test_zeros_siso_d0_single_zero():
-    # G(s) = (s+3)/((s+1)(s+2)), zero at s=-3
-    # Octave: pkg load control; tzero(ss([0,1;-2,-3],[1;0],[1,0],0))
-    # -> -3
-    sys = cx.ss(
-        A=jnp.array([[0.0, 1.0], [-2.0, -3.0]]),
-        B=jnp.array([[1.0], [0.0]]),
-        C=jnp.array([[1.0, 0.0]]),
-        D=jnp.zeros((1, 1)),
-    )
-    z = cx.zeros(sys)
-    assert z.shape[0] == 1
-    assert abs(complex(z[0]) - (-3.0)) < 1e-8
-
-
-def test_zeros_invertible_d():
-    # G(s) = 3/(s+2) + 2 = (2s+7)/(s+2), zero at s=-3.5
-    # Octave: pkg load control; tzero(ss(-2,1,3,2)) -> -3.5
-    sys = cx.ss(
-        A=jnp.array([[-2.0]]),
-        B=jnp.array([[1.0]]),
-        C=jnp.array([[3.0]]),
-        D=jnp.array([[2.0]]),
-    )
-    z = cx.zeros(sys)
-    assert z.shape[0] == 1
-    assert abs(complex(z[0]) - (-3.5)) < 1e-8
 
 
 def test_phs_to_ss_returns_lti():

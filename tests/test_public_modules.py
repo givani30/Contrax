@@ -6,7 +6,7 @@ import contrax.systems as systems_api
 import contrax.types as types_api
 
 
-def test_systems_namespace_exports_public_modeling_surface():
+def test_public_namespaces_export_their_public_surfaces():
     assert systems_api.ss is cx.ss
     assert systems_api.dss is cx.dss
     assert systems_api.c2d is cx.c2d
@@ -25,9 +25,6 @@ def test_systems_namespace_exports_public_modeling_surface():
     assert systems_api.symmetrize_matrix is cx.symmetrize_matrix
     assert systems_api.project_psd is cx.project_psd
     assert systems_api.phs_diagnostics is cx.phs_diagnostics
-
-
-def test_simulation_namespace_exports_public_simulation_surface():
     assert sim_api.rollout is cx.rollout
     assert sim_api.foh_inputs is cx.foh_inputs
     assert sim_api.sample_system is cx.sample_system
@@ -37,17 +34,13 @@ def test_simulation_namespace_exports_public_simulation_surface():
     assert sim_api.impulse_response is cx.impulse_response
     assert sim_api.initial_response is cx.initial_response
     assert sim_api.as_ode_term is cx.as_ode_term
-
-
-def test_top_level_exports_parameterization_helpers():
     assert callable(cx.positive_exp)
     assert callable(cx.positive_softplus)
     assert callable(cx.lower_triangular)
     assert callable(cx.spd_from_cholesky_raw)
     assert callable(cx.diagonal_spd)
-
-
-def test_types_namespace_exports_result_bundles():
+    assert callable(cx.ctrb_gramian)
+    assert callable(cx.obsv_gramian)
     assert types_api.LQRResult is cx.LQRResult
     assert types_api.KalmanGainResult is cx.KalmanGainResult
     assert types_api.KalmanResult is cx.KalmanResult

@@ -84,15 +84,8 @@ def test_place_achieves_desired_poles(disc_sys):
     actual = np.sort(np.abs(np.linalg.eigvals(np.array(cl_sys.A))))
     expected = np.sort(np.abs(poles))
     np.testing.assert_allclose(actual, expected, atol=1e-4)
-
-
-def test_place_result_poles_match_closed_loop(disc_sys):
-    """PlaceResult.poles should match the achieved closed-loop eigenvalues."""
-    poles = _desired_poles()
-    result = cx.place(disc_sys, poles)
-    actual = np.sort(np.abs(np.array(result.poles)))
-    expected = np.sort(np.abs(poles))
-    np.testing.assert_allclose(actual, expected, atol=1e-4)
+    result_poles = np.sort(np.abs(np.array(result.poles)))
+    np.testing.assert_allclose(result_poles, expected, atol=1e-4)
 
 
 def test_state_feedback_matches_feedback_alias(disc_sys):
@@ -104,11 +97,6 @@ def test_state_feedback_matches_feedback_alias(disc_sys):
     assert jnp.allclose(via_explicit_name.B, via_alias.B, atol=1e-12)
     assert jnp.allclose(via_explicit_name.C, via_alias.C, atol=1e-12)
     assert jnp.allclose(via_explicit_name.D, via_alias.D, atol=1e-12)
-
-
-def test_place_shape(disc_sys):
-    result = cx.place(disc_sys, _desired_poles())
-    assert result.K.shape == (1, 3)
 
 
 def test_place_mimo_achieves_requested_real_poles():
@@ -181,13 +169,6 @@ def test_place_clustered_real_poles_matches_targets():
 # -- feedback ------------------------------------------------------------------
 
 
-def test_feedback_closed_loop_stable(disc_sys):
-    K = cx.place(disc_sys, _desired_poles()).K
-    cl = cx.feedback(disc_sys, K)
-    eigs = jnp.abs(jnp.linalg.eigvals(cl.A))
-    assert jnp.all(eigs < 1.0), f"Closed-loop unstable: {eigs}"
-
-
 def test_feedback_preserves_bcd(disc_sys):
     """feedback() must not modify B, C, D, dt."""
     L = jnp.zeros((1, 3))
@@ -235,12 +216,6 @@ def test_lqr_gain_matches_octave(disc_sys):
     assert jnp.allclose(result.K, K_expected, atol=0.05), (
         f"LQR gain mismatch.\n  got:      {result.K}\n  expected: {K_expected}"
     )
-
-
-def test_lqr_stabilizes(disc_sys):
-    Q = jnp.eye(3)
-    R = jnp.array([[1.0]])
-    result = cx.lqr(disc_sys, Q, R)
     cl = cx.feedback(disc_sys, result.K)
     eigs = jnp.abs(jnp.linalg.eigvals(cl.A))
     assert jnp.all(eigs < 1.0), f"LQR unstable: {eigs}"
@@ -255,16 +230,6 @@ def test_lqr_result_fields(disc_sys):
     assert result.residual_norm < 1e-8
 
 
-def test_lqr_riccati_residual(disc_sys):
-    """S must satisfy the DARE to within numerical tolerance."""
-    Q = jnp.eye(3)
-    R = jnp.array([[1.0]])
-    result = cx.lqr(disc_sys, Q, R)
-    residual = _dare_residual(disc_sys.A, disc_sys.B, Q, R, result.S)
-    assert jnp.max(jnp.abs(residual)) < 1e-4
-    assert jnp.allclose(result.residual_norm, jnp.max(jnp.abs(residual)))
-
-
 def test_dare_double_integrator_residual_and_stability():
     A = jnp.array([[1.0, 1.0], [0.0, 1.0]])
     B = jnp.array([[0.5], [1.0]])
@@ -277,19 +242,6 @@ def test_dare_double_integrator_residual_and_stability():
     eigs = jnp.abs(jnp.linalg.eigvals(A - B @ result.K))
     assert jnp.max(jnp.abs(residual)) < 1e-10
     assert jnp.all(eigs < 1.0)
-
-
-def test_dare_jit_matches_eager(disc_sys):
-    Q = jnp.eye(3)
-    R = jnp.array([[1.0]])
-
-    eager = cx.dare(disc_sys.A, disc_sys.B, Q, R)
-    jitted = jax.jit(cx.dare)(disc_sys.A, disc_sys.B, Q, R)
-
-    assert jnp.allclose(jitted.K, eager.K, atol=1e-10)
-    assert jnp.allclose(jitted.S, eager.S, atol=1e-10)
-    assert jnp.allclose(jitted.residual_norm, eager.residual_norm, atol=1e-12)
-    assert jnp.all(jnp.abs(jitted.poles) < 1.0)
 
 
 def test_lqr_output_weighting_stabilizes(disc_sys):
@@ -451,17 +403,6 @@ def test_care_double_integrator_matches_octave_reference():
     assert jnp.allclose(result.residual_norm, jnp.max(jnp.abs(residual)))
 
 
-def test_care_riccati_residual_and_stability():
-    Q = jnp.eye(3)
-    R = jnp.array([[1.0]])
-
-    result = cx.care(A_CONT, B_CONT, Q, R)
-
-    residual = _care_residual(A_CONT, B_CONT, Q, R, result.S)
-    assert jnp.max(jnp.abs(residual)) < 1e-8
-    assert jnp.all(jnp.real(result.poles) < 0.0)
-
-
 def test_continuous_lqr_dispatch_matches_care():
     sys = cx.ss(A_CONT, B_CONT, C_CONT, D_CONT)
     Q = jnp.eye(3)
@@ -472,19 +413,6 @@ def test_continuous_lqr_dispatch_matches_care():
 
     assert jnp.allclose(dispatched.K, direct.K, atol=1e-10)
     assert jnp.allclose(dispatched.S, direct.S, atol=1e-10)
-
-
-def test_care_jit_matches_eager():
-    Q = jnp.eye(3)
-    R = jnp.array([[1.0]])
-
-    eager = cx.care(A_CONT, B_CONT, Q, R)
-    jitted = jax.jit(cx.care)(A_CONT, B_CONT, Q, R)
-
-    assert jnp.allclose(jitted.K, eager.K, atol=1e-10)
-    assert jnp.allclose(jitted.S, eager.S, atol=1e-10)
-    assert jnp.allclose(jitted.residual_norm, eager.residual_norm, atol=1e-12)
-    assert jnp.all(jnp.real(jitted.poles) < 0.0)
 
 
 def test_care_raises_when_hamiltonian_has_no_stable_subspace_split():

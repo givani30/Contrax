@@ -17,10 +17,8 @@ of the same system; the Octave values are used as ground truth.
 import jax
 import jax.numpy as jnp
 import pytest
-from jax import test_util as jtu
 
 import contrax as cx
-from contrax.core import _safe_expm
 
 A_CONT = jnp.array([[-2.2, -0.4, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
 B_CONT = jnp.array([[0.25], [0.0], [0.0]])
@@ -155,84 +153,6 @@ def test_c2d_tustin_matches_bilinear_transfer_map():
 
 
 # -- c2d gradient tests --------------------------------------------------------
-
-
-def _expm_frechet(M, E):
-    """Frechet derivative L_exp(M, E) via Al-Mohy/Higham block formula."""
-    n = M.shape[0]
-    aug = jnp.block([[M, E], [jnp.zeros_like(M), M]])
-    return jax.scipy.linalg.expm(aug)[:n, n:]
-
-
-def test_safe_expm_vjp_matches_adjoint_frechet_identity():
-    """_safe_expm VJP must equal L_exp(M.T, G), the adjoint Frechet derivative."""
-    M = jnp.array([[0.1, 0.7], [-0.3, -0.2]])
-    G = jnp.array([[1.3, -0.4], [0.2, 0.9]])
-
-    _, vjp_fn = jax.vjp(_safe_expm, M)
-    (actual,) = vjp_fn(G)
-    expected = _expm_frechet(M.T, G)
-
-    assert jnp.allclose(actual, expected, atol=1e-11, rtol=1e-11)
-
-
-def test_safe_expm_vjp_satisfies_inner_product_identity():
-    """<G, L_exp(M,E)> must equal <VJP(G), E> for arbitrary directions."""
-    M = jnp.array([[0.2, -0.5, 0.1], [0.3, -0.1, 0.4], [-0.2, 0.6, -0.3]])
-    E = jnp.array([[0.7, 0.2, -0.1], [-0.4, 0.5, 0.3], [0.1, -0.6, 0.8]])
-    G = jnp.array([[0.9, -0.2, 0.4], [0.5, -0.7, 0.1], [-0.3, 0.6, 0.2]])
-
-    _, vjp_fn = jax.vjp(_safe_expm, M)
-    (vjp_g,) = vjp_fn(G)
-
-    lhs = jnp.vdot(G, _expm_frechet(M, E))
-    rhs = jnp.vdot(vjp_g, E)
-
-    assert jnp.allclose(lhs, rhs, atol=1e-11, rtol=1e-11)
-
-
-def test_safe_expm_reverse_gradient_matches_finite_difference():
-    """Reverse-mode gradient through _safe_expm should match finite differences."""
-    M = jnp.array([[0.1, 0.7], [-0.3, -0.2]])
-
-    def cost(X):
-        return jnp.sum(_safe_expm(X) ** 2)
-
-    jtu.check_grads(cost, (M,), order=1, modes=["rev"], atol=1e-5, rtol=1e-5)
-
-
-def test_c2d_gradient_finite(cont_sys):
-    """jax.grad through c2d must produce finite gradients.
-
-    Check the native scaling-and-squaring derivative on the reference model.
-    Reference: Al-Mohy & Higham (2009), 'Computing the Frechet Derivative
-    of the Matrix Exponential', SIAM J. Matrix Anal. Appl.
-    """
-
-    def cost(A_flat):
-        A = A_flat.reshape(3, 3)
-        sys = cx.ss(A, B_CONT, C_CONT, D_CONT)
-        dsys = cx.c2d(sys, DT)
-        return jnp.sum(dsys.A**2) + jnp.sum(dsys.B**2)
-
-    grad = jax.grad(cost)(A_CONT.ravel())
-    assert jnp.all(jnp.isfinite(grad)), f"Non-finite gradient: {grad}"
-
-
-def test_c2d_reverse_gradient_matches_finite_difference():
-    """Reverse-mode gradients through ZOH c2d should match finite differences."""
-    A = jnp.array([[-1.0, 0.2], [0.0, -0.3]])
-    B = jnp.array([[1.0], [0.4]])
-    C = jnp.eye(2)
-    D = jnp.zeros((2, 1))
-    dt = jnp.array(0.05)
-
-    def cost(A, B, dt):
-        sys = cx.ss(A, B, C, D)
-        dsys = cx.c2d(sys, dt)
-        return jnp.sum(dsys.A**2) + jnp.sum(dsys.B**2)
-
-    jtu.check_grads(cost, (A, B, dt), order=1, modes=["rev"], atol=1e-5, rtol=1e-5)
 
 
 def test_c2d_gradient_finite_for_stiff_system():

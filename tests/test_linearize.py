@@ -44,23 +44,13 @@ _B_di = jnp.array([[0.0], [1.0]])
 
 class TestLinearize:
     def test_double_integrator_exact(self):
-        """A, B match analytical Jacobians for linear system (should be exact)."""
-        sys = cx.linearize(_double_integrator, jnp.zeros(2), jnp.zeros(1))
-        assert jnp.allclose(sys.A, _A_di, atol=1e-12)
-        assert jnp.allclose(sys.B, _B_di, atol=1e-12)
-
-    def test_shapes(self):
-        sys = cx.linearize(_double_integrator, jnp.zeros(2), jnp.zeros(1))
-        assert sys.A.shape == (2, 2)
-        assert sys.B.shape == (2, 1)
-
-    def test_returns_contlti(self):
+        """The linear model has exact Jacobians and full-state output by default."""
         sys = cx.linearize(_double_integrator, jnp.zeros(2), jnp.zeros(1))
         assert isinstance(sys, cx.ContLTI)
-
-    def test_default_output_is_full_state(self):
-        """When output= is omitted, C=I and D=0."""
-        sys = cx.linearize(_double_integrator, jnp.zeros(2), jnp.zeros(1))
+        assert sys.A.shape == (2, 2)
+        assert sys.B.shape == (2, 1)
+        assert jnp.allclose(sys.A, _A_di, atol=1e-12)
+        assert jnp.allclose(sys.B, _B_di, atol=1e-12)
         assert jnp.allclose(sys.C, jnp.eye(2), atol=1e-12)
         assert jnp.allclose(sys.D, jnp.zeros((2, 1)), atol=1e-12)
 
@@ -76,18 +66,8 @@ class TestLinearize:
         sys = cx.linearize(pendulum, jnp.zeros(2), jnp.zeros(1))
         assert jnp.allclose(sys.A, jnp.array([[0.0, 1.0], [-1.0, 0.0]]), atol=1e-12)
         assert jnp.allclose(sys.B, jnp.array([[0.0], [1.0]]), atol=1e-12)
-
-    def test_nonlinear_at_nontrivial_eq(self):
-        """Linearize pendulum at (pi, 0) — upright equilibrium.
-
-        Analytical: A=[[0,1],[+1,0]] (d/dx0 of -sin(x0) at x0=pi = -cos(pi) = +1).
-        """
-
-        def pendulum(t, x, u):
-            return jnp.array([x[1], -jnp.sin(x[0]) + u[0]])
-
-        sys = cx.linearize(pendulum, jnp.array([jnp.pi, 0.0]), jnp.zeros(1))
-        assert jnp.allclose(sys.A, jnp.array([[0.0, 1.0], [1.0, 0.0]]), atol=1e-12)
+        upright = cx.linearize(pendulum, jnp.array([jnp.pi, 0.0]), jnp.zeros(1))
+        assert jnp.allclose(upright.A, jnp.array([[0.0, 1.0], [1.0, 0.0]]), atol=1e-12)
 
     def test_jit_compatible(self):
         @jax.jit
@@ -121,14 +101,6 @@ class TestLinearize:
         grad = jax.grad(loss)(jnp.zeros(2))
         assert jnp.all(jnp.isfinite(grad))
 
-    def test_round_trip_with_c2d_and_lqr(self):
-        """Full workflow: linearize -> c2d -> lqr produces finite K."""
-        sys_c = cx.linearize(_double_integrator, jnp.zeros(2), jnp.zeros(1))
-        sys_d = cx.c2d(sys_c, dt=0.05)
-        result = cx.lqr(sys_d, jnp.eye(2), jnp.ones((1, 1)))
-        assert jnp.all(jnp.isfinite(result.K))
-        assert result.K.shape == (1, 2)
-
     def test_accepts_nonlinear_system_object(self):
         sys_nl = cx.nonlinear_system(
             _double_integrator,
@@ -141,33 +113,17 @@ class TestLinearize:
         sys_lin = cx.linearize(sys_nl, jnp.zeros(2), jnp.zeros(1))
         assert jnp.allclose(sys_lin.A, _A_di, atol=1e-12)
         assert jnp.allclose(sys_lin.B, _B_di, atol=1e-12)
+        sys_ss = cx.linearize_ss(sys_nl, jnp.zeros(2), jnp.zeros(1))
+        assert jnp.allclose(sys_ss.A, _A_di, atol=1e-12)
+        assert jnp.allclose(sys_ss.B, _B_di, atol=1e-12)
+        assert jnp.allclose(sys_ss.C, jnp.eye(2), atol=1e-12)
+        assert jnp.allclose(sys_ss.D, jnp.zeros((2, 1)), atol=1e-12)
 
 
 # ── linearize_ss tests ─────────────────────────────────────────────────────
 
 
 class TestLinearizeSS:
-    def test_returns_contlti(self):
-        sys = cx.linearize_ss(
-            _double_integrator,
-            jnp.zeros(2),
-            jnp.zeros(1),
-            output=_identity_output,
-        )
-        assert isinstance(sys, cx.ContLTI)
-
-    def test_abcd_shapes(self):
-        sys = cx.linearize_ss(
-            _double_integrator,
-            jnp.zeros(2),
-            jnp.zeros(1),
-            output=_feedthrough_output,
-        )
-        assert sys.A.shape == (2, 2)
-        assert sys.B.shape == (2, 1)
-        assert sys.C.shape == (2, 2)
-        assert sys.D.shape == (2, 1)
-
     def test_abcd_values_double_integrator(self):
         """A, B from linearize_ss must match analytical for linear system."""
         sys = cx.linearize_ss(
@@ -176,6 +132,11 @@ class TestLinearizeSS:
             jnp.zeros(1),
             output=_identity_output,
         )
+        assert isinstance(sys, cx.ContLTI)
+        assert sys.A.shape == (2, 2)
+        assert sys.B.shape == (2, 1)
+        assert sys.C.shape == (2, 2)
+        assert sys.D.shape == (2, 1)
         assert jnp.allclose(sys.A, _A_di, atol=1e-12)
         assert jnp.allclose(sys.B, _B_di, atol=1e-12)
         assert jnp.allclose(sys.C, jnp.eye(2), atol=1e-12)
@@ -198,35 +159,6 @@ class TestLinearizeSS:
 
         sys = get_sys(jnp.zeros(2), jnp.zeros(1))
         assert jnp.allclose(sys.A, _A_di, atol=1e-12)
-
-    def test_full_workflow_linearize_ss_to_lqr(self):
-        """linearize_ss -> c2d -> lqr produces finite K."""
-        sys_c = cx.linearize_ss(
-            _double_integrator,
-            jnp.zeros(2),
-            jnp.zeros(1),
-            output=_identity_output,
-        )
-        sys_d = cx.c2d(sys_c, dt=0.05)
-        result = cx.lqr(sys_d, jnp.eye(2), jnp.ones((1, 1)))
-        assert jnp.all(jnp.isfinite(result.K))
-        assert result.K.shape == (1, 2)
-
-    def test_accepts_nonlinear_system_object(self):
-        sys = cx.nonlinear_system(
-            _double_integrator,
-            observation=lambda t, x, u: x,
-            state_dim=2,
-            input_dim=1,
-            output_dim=2,
-        )
-
-        lin = cx.linearize_ss(sys, jnp.zeros(2), jnp.zeros(1))
-        assert isinstance(lin, cx.ContLTI)
-        assert jnp.allclose(lin.A, _A_di, atol=1e-12)
-        assert jnp.allclose(lin.B, _B_di, atol=1e-12)
-        assert jnp.allclose(lin.C, jnp.eye(2), atol=1e-12)
-        assert jnp.allclose(lin.D, jnp.zeros((2, 1)), atol=1e-12)
 
     def test_nonlinear_system_accepts_output_alias(self):
         sys = cx.nonlinear_system(

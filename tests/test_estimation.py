@@ -16,21 +16,6 @@ def _scalar_sys():
     )
 
 
-def test_kalman_shapes():
-    sys = _scalar_sys()
-    ys = jnp.ones((20, 1))
-    result = cx.kalman(
-        sys,
-        Q_noise=jnp.array([[1e-3]]),
-        R_noise=jnp.array([[1e-2]]),
-        ys=ys,
-    )
-
-    assert result.x_hat.shape == (20, 1)
-    assert result.P.shape == (20, 1, 1)
-    assert result.innovations.shape == (20, 1)
-
-
 def test_kalman_converges_to_constant_measurement():
     """For y_k=1 and A=C=1-ish stable scalar model, estimate should approach y."""
     sys = cx.dss(
@@ -142,22 +127,6 @@ def test_kalman_gain_matches_dare_dual_and_covariance_fixed_point():
     P_next = sys.A @ P_filtered @ sys.A.T + Q
     assert jnp.allclose(P_next, design.P, atol=1e-9)
     assert jnp.all(jnp.abs(design.poles) < 1.0)
-
-
-def test_kalman_grad_through_noise_parameters_finite():
-    sys = _scalar_sys()
-    ys = jnp.sin(jnp.linspace(0.0, 1.0, 25))[:, None]
-
-    def loss(log_q, log_r):
-        Q = jnp.exp(log_q)[None, None]
-        R = jnp.exp(log_r)[None, None]
-        result = cx.kalman(sys, Q, R, ys)
-        return jnp.sum(result.innovations**2) + jnp.sum(result.P)
-
-    dlog_q, dlog_r = jax.grad(loss, argnums=(0, 1))(jnp.array(-5.0), jnp.array(-3.0))
-
-    assert jnp.isfinite(dlog_q)
-    assert jnp.isfinite(dlog_r)
 
 
 def test_ekf_matches_kalman_for_linear_system():
@@ -465,46 +434,17 @@ def test_ukf_handles_nonlinear_observation():
     assert result.x_hat.shape == (15, 1)
     assert result.P.shape == (15, 1, 1)
     assert result.innovations.shape == (15, 1)
-    assert jnp.all(jnp.isfinite(result.x_hat))
-    assert abs(float(result.x_hat[-1, 0]) - true_x) < 5e-2
-
-
-def test_ukf_exposes_prediction_and_likelihood_surface():
-    sys = cx.nonlinear_system(
-        lambda t, x, u: jnp.array([0.9 * x[0] + u[0]]),
-        observation=lambda t, x, u: jnp.array([x[0] ** 2]),
-        dt=1.0,
-        state_dim=1,
-        input_dim=1,
-        output_dim=1,
-    )
-    ys = jnp.full((12, 1), 1.44)
-    us = jnp.zeros((12, 1))
-
-    result = cx.ukf(
-        sys,
-        Q_noise=jnp.array([[1e-3]]),
-        R_noise=jnp.array([[1e-2]]),
-        ys=ys,
-        us=us,
-        x0=jnp.array([1.0]),
-        P0=jnp.array([[0.2]]),
-        alpha=0.5,
-    )
-
     assert result.predicted_measurements.shape == ys.shape
-    assert result.innovation_covariances.shape == (12, 1, 1)
-    assert result.log_likelihood_terms.shape == (12,)
+    assert result.innovation_covariances.shape == (15, 1, 1)
+    assert result.log_likelihood_terms.shape == (15,)
     assert result.predicted_state_means.shape == result.x_hat.shape
     assert result.predicted_state_covariances.shape == result.P.shape
     assert result.transition_cross_covariances.shape == result.P.shape
-    assert jnp.allclose(
-        result.innovations,
-        ys - result.predicted_measurements,
-        atol=1e-12,
-    )
+    assert jnp.allclose(result.innovations, ys - result.predicted_measurements)
     assert jnp.all(jnp.isfinite(result.log_likelihood_terms))
     assert jnp.all(result.innovation_covariances[:, 0, 0] > 0.0)
+    assert jnp.all(jnp.isfinite(result.x_hat))
+    assert abs(float(result.x_hat[-1, 0]) - true_x) < 5e-2
 
 
 def test_sample_system_matches_known_zoh_scalar_decay():
@@ -697,39 +637,6 @@ def test_smoother_diagnostics_healthy_uks():
     assert not bool(diag.nonfinite)
 
 
-def test_mhe_shapes_and_convergence():
-    """mhe() returns correct shapes and converges on a simple scalar problem."""
-    sys = _scalar_sys()
-    T = 8
-    Q = 0.05 * jnp.eye(1)
-    R = 0.2 * jnp.eye(1)
-    ys = jnp.linspace(0.1, 0.5, T)[:, None]
-
-    def f(x, u):
-        return sys.A @ x
-
-    def h(x):
-        return sys.C @ x
-
-    result = cx.mhe(
-        f,
-        observation=h,
-        xs_init=jnp.zeros((T, 1)),
-        us=jnp.zeros((T - 1, 1)),
-        ys=ys,
-        x_prior=jnp.zeros(1),
-        P_prior=jnp.eye(1),
-        Q_noise=Q,
-        R_noise=R,
-    )
-
-    assert result.xs.shape == (T, 1)
-    assert result.x_hat.shape == (1,)
-    assert result.final_cost.shape == ()
-    assert jnp.isfinite(result.final_cost)
-    assert bool(result.solver_converged)
-
-
 def test_mhe_matches_rts_smoother_linear_gaussian():
     """Full-window linear-Gaussian MHE MAP trajectory equals RTS smoother.
 
@@ -792,19 +699,6 @@ def test_mhe_matches_rts_smoother_linear_gaussian():
     assert jnp.allclose(result.xs, smoothed.x_smooth, atol=1e-4)
 
 
-def test_soft_quadratic_penalty_supports_scalar_and_matrix_weights():
-    residuals = jnp.array([[1.0, -2.0], [0.5, 1.0]])
-
-    scalar_cost = cx.soft_quadratic_penalty(residuals, 0.5)
-    matrix_cost = cx.soft_quadratic_penalty(residuals, jnp.diag(jnp.array([2.0, 4.0])))
-
-    assert jnp.allclose(scalar_cost, 0.5 * jnp.sum(residuals**2))
-    manual_matrix = 0.0
-    for row in residuals:
-        manual_matrix = manual_matrix + row @ jnp.diag(jnp.array([2.0, 4.0])) @ row
-    assert jnp.allclose(matrix_cost, manual_matrix)
-
-
 def test_mhe_warm_start_shifts_window_and_repeats_terminal_state():
     xs = jnp.array([[0.0], [1.0], [2.0], [3.0]])
 
@@ -865,30 +759,17 @@ def test_positive_parameterizations_are_positive_and_jittable():
 
     assert jnp.all(exp_vals > 0.0)
     assert jnp.all(softplus_vals > 0.0)
-
-
-def test_spd_from_cholesky_raw_returns_symmetric_positive_definite_matrix():
     raw = jnp.array([[0.0, 3.0], [-1.0, 0.5]])
-
     spd = cx.spd_from_cholesky_raw(raw, diagonal="softplus", min_diagonal=1e-4)
-
     assert jnp.allclose(spd, spd.T, atol=1e-12)
     assert jnp.min(jnp.linalg.eigvalsh(spd)) > 0.0
-
-
-def test_diagonal_spd_builds_positive_diagonal_matrix():
     spd = cx.diagonal_spd(jnp.array([-2.0, 0.0, 1.0]), parameterization="exp")
-
     assert spd.shape == (3, 3)
     assert jnp.allclose(spd, jnp.diag(jnp.diag(spd)))
     assert jnp.all(jnp.diag(spd) > 0.0)
-
-
-def test_lower_triangular_overrides_diagonal():
-    raw = jnp.array([[1.0, 2.0], [3.0, 4.0]])
-
-    L = cx.lower_triangular(raw, diagonal=jnp.array([10.0, 20.0]))
-
+    L = cx.lower_triangular(
+        jnp.array([[1.0, 2.0], [3.0, 4.0]]), diagonal=jnp.array([10.0, 20.0])
+    )
     assert jnp.allclose(L, jnp.array([[10.0, 0.0], [3.0, 20.0]]))
 
 

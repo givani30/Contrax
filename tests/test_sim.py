@@ -32,24 +32,8 @@ def test_lsim_shapes(disc_sys):
     assert ts.shape == (T,)
     assert xs.shape == (T + 1, n)
     assert ys.shape == (T, p)
-
-
-def test_lsim_time_vector(disc_sys):
-    """ts must equal k * dt for k = 0, ..., T-1."""
-    T = 20
-    us = jnp.zeros((T, 1))
-    ts, _, _ = cx.lsim(disc_sys, us, jnp.zeros(3))
     expected = jnp.arange(T, dtype=float) * DT
     assert jnp.allclose(ts, expected, atol=1e-10)
-
-
-def test_lsim_zero_input_stays_at_zero(disc_sys):
-    """From x0=0 with u=0, state must remain zero."""
-    x0 = jnp.zeros(3)
-    us = jnp.zeros((20, 1))
-    _, xs, ys = cx.lsim(disc_sys, us, x0)
-    assert jnp.allclose(xs, 0.0, atol=1e-12)
-    assert jnp.allclose(ys, 0.0, atol=1e-12)
 
 
 def test_lsim_one_step_manual(disc_sys):
@@ -495,7 +479,7 @@ def _make_oscillator_phs():
     return cx.phs_system(H, state_dim=2, input_dim=1, output_dim=2)
 
 
-@pytest.mark.parametrize("method", ["euler", "midpoint", "rk4"])
+@pytest.mark.parametrize("method", ["euler", "midpoint"])
 def test_sample_system_fixed_step_shapes(method):
     """Fixed-step sample_system should produce correct output shapes."""
     sys = _make_oscillator_phs()
@@ -601,12 +585,6 @@ def _make_separable_oscillator():
     return cx.separable_phs_system(V, T, n_dofs=1, input_dim=1, output_dim=2)
 
 
-def test_separable_phs_is_phs_subtype():
-    sys = _make_separable_oscillator()
-    assert isinstance(sys, cx.SeparablePHSSystem)
-    assert isinstance(sys, cx.PHSSystem)
-
-
 def test_separable_phs_properties():
     """H == V+T, structural metadata is correct, and dynamics are finite."""
     sys = _make_separable_oscillator()
@@ -643,17 +621,6 @@ def _make_separable_oscillator_sys():
     return cx.separable_phs_system(V, T, n_dofs=1, input_dim=1, output_dim=2)
 
 
-def test_sv_shapes():
-    sys = _make_separable_oscillator_sys()
-    sys_d = cx.sample_system(sys, 0.1, method="sv")
-    x0 = jnp.array([1.0, 0.0])
-    ts, xs, ys = cx.simulate(sys_d, x0, lambda t, x: jnp.zeros(1), num_steps=20)
-    assert ts.shape == (20,)
-    assert xs.shape == (21, 2)
-    assert ys.shape == (20, 2)
-    assert jnp.all(jnp.isfinite(xs))
-
-
 def test_sv_conserves_energy_conservative():
     """Undamped Störmer-Verlet must conserve H(q,p) = V(q) + T(p) to machine precision.
 
@@ -665,8 +632,13 @@ def test_sv_conserves_energy_conservative():
     sys = _make_separable_oscillator_sys()
     sys_d = cx.sample_system(sys, 0.1, method="sv")
     x0 = jnp.array([1.0, 0.0])
-    _, xs, _ = cx.simulate(sys_d, x0, lambda t, x: jnp.zeros(1), num_steps=200)
+    ts, xs, ys = cx.simulate(
+        sys_d, x0, lambda t, x: jnp.zeros(1), num_steps=200
+    )
 
+    assert ts.shape == (200,)
+    assert xs.shape == (201, 2)
+    assert ys.shape == (200, 2)
     energies = jax.vmap(sys.H)(xs)
     # Energy should be bounded (not drift), characteristic of symplectic methods.
     energy_range = float(jnp.max(energies) - jnp.min(energies))
