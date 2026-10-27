@@ -67,11 +67,16 @@ def test_slicot_ab08nd_rectangular_nonminimal_reference_and_dual():
     Kronecker block; the dual exercises right singular structure as well.
     """
     A = jnp.diag(jnp.array([1.0, 1.0, 3.0, -4.0, -1.0, 3.0]))
-    B = jnp.array([[0.0, -1.0], [-1.0, 0.0], [1.0, -1.0],
-                   [0.0, 0.0], [0.0, 1.0], [-1.0, -1.0]])
-    C = jnp.array([[1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
-                   [0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
-                   [0.0, 0.0, 1.0, 0.0, 0.0, 1.0]])
+    B = jnp.array(
+        [[0.0, -1.0], [-1.0, 0.0], [1.0, -1.0], [0.0, 0.0], [0.0, 1.0], [-1.0, -1.0]]
+    )
+    C = jnp.array(
+        [
+            [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+            [0.0, 0.0, 1.0, 0.0, 0.0, 1.0],
+        ]
+    )
     D = jnp.zeros((3, 2))
     for sys in (cx.ss(A, B, C, D), cx.ss(A.T, C.T, B.T, D.T)):
         np.testing.assert_allclose(np.sort_complex(cx.zeros(sys)), [-1, 2], atol=1e-10)

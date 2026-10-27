@@ -136,6 +136,7 @@ class TestLinearize:
         assert isinstance(sampled, cx.DiscLTI)
         assert jnp.allclose(sampled.A[0, 0], expected, atol=1e-12)
         assert jnp.allclose(sampled.B[0, 0], 1 - expected, atol=1e-12)
+
         def state_jacobian(a):
             return sampled_local(a).A[0, 0]
 

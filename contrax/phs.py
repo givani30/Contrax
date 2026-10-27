@@ -12,7 +12,7 @@ from jax import Array
 from jax.typing import ArrayLike
 
 from contrax._model_validation import dimension, sample_period
-from contrax.core import ContLTI
+from contrax.core import ContLTI, DiscLTI
 from contrax.nonlinear import NonlinearSystem
 from contrax.parameterization import _positive_inputs
 from contrax.types import PHSStructureDiagnostics
@@ -477,12 +477,13 @@ def phs_to_ss(
     sys: PHSSystem,
     x_eq: Array,
     u_eq: Array,
-) -> ContLTI:
-    """Linearize a port-Hamiltonian system to a continuous-time state-space model.
+) -> ContLTI | DiscLTI:
+    """Linearize a port-Hamiltonian model, preserving its time domain.
 
     Computes the Jacobian linearization of the PHS dynamics and observation map
-    at the operating point `(x_eq, u_eq)`. The result is the standard
-    `ẋ ≈ A δx + B δu` / `y ≈ C δx + D δu` form around that point.
+    at `(x_eq, u_eq)`. The result models state/input/output deviations; constant
+    operating-point offsets are omitted. Continuous models use
+    delta_x_dot = A delta_x + B delta_u; discrete models use delta_x_next.
 
     For a linear PHS with quadratic Hamiltonian `H(x) = ½ x^T M x`, the
     linearization is exact and gives `A = (J - R) M`, `B = G`.
@@ -496,8 +497,8 @@ def phs_to_ss(
         u_eq: Equilibrium input. Shape: `(m,)`.
 
     Returns:
-        [ContLTI][contrax.systems.ContLTI]: Continuous-time LTI approximation
-        at `(x_eq, u_eq)`.
+        ContLTI | DiscLTI: Local LTI approximation at `(x_eq, u_eq)`, retaining
+            the model's discrete sample period when supplied.
 
     Examples:
         >>> import jax.numpy as jnp

@@ -183,7 +183,9 @@ Use it when building a [`PHSSystem`][contrax.systems.PHSSystem] whose
 structure map is standard symplectic rather than a custom dissipative one.
 
 `phs_to_ss(sys, x_eq, u_eq)` linearizes a PHS at an operating point and
-returns a [`ContLTI`][contrax.systems.ContLTI]. This is the standard bridge
+returns a [`ContLTI`][contrax.systems.ContLTI] for a continuous model or a
+[`DiscLTI`][contrax.systems.DiscLTI] retaining an explicit discrete period.
+For a continuous model, this is the standard bridge
 from a structured nonlinear PHS model into the linear control design stack
 (`lqr`, `place`, `kalman_gain`, etc.):
 

@@ -264,3 +264,7 @@ def test_phs_to_ss_returns_lti():
     assert isinstance(lti, cx.ContLTI)
     assert lti.A.shape == (2, 2)
     assert lti.B.shape == (2, 1)
+    discrete = cx.phs_system(H, dt=0.2, state_dim=2, input_dim=1)
+    local = cx.phs_to_ss(discrete, jnp.zeros(2), jnp.zeros(1))
+    assert isinstance(local, cx.DiscLTI) and local.dt == 0.2
+    np.testing.assert_allclose(local.A, lti.A)
