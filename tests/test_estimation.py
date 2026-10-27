@@ -1,5 +1,6 @@
 """Tests for contrax.estimation — Kalman, EKF, UKF, and RTS smoother."""
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import pytest
@@ -575,6 +576,21 @@ def test_ukf_diagnostics_wrap_common_ukf_summary():
     assert isinstance(likelihood_diag, cx.LikelihoodDiagnostics)
     assert innovation_diag.nis.shape == (5,)
     assert likelihood_diag.log_likelihood_terms.shape == (5,)
+    assert jax.jit(cx.innovation_rms)(result) == 0
+    masked = eqx.tree_at(
+        lambda r: (r.innovations, r.has_measurement),
+        result,
+        (
+            jnp.array([[3.0], [jnp.nan], [jnp.nan], [jnp.nan], [jnp.nan]]),
+            jnp.array([True, False, False, False, False]),
+        ),
+    )
+    assert cx.innovation_rms(masked) == 3
+    summary = cx.likelihood_diagnostics(
+        jnp.array([-1.0, jnp.nan]), has_measurement=jnp.array([True, False])
+    )
+    assert summary.total_log_likelihood == summary.mean_log_likelihood == -1
+    assert not summary.nonfinite
 
 
 def test_smoother_diagnostics_healthy_rts():
@@ -775,6 +791,7 @@ def test_positive_parameterizations_are_positive_and_jittable():
         cx.spd_from_cholesky_raw(jnp.eye(2, dtype=complex))
     with pytest.raises(Exception, match="finite and nonnegative"):
         jax.jit(lambda floor: cx.positive_exp(0.0, min_value=floor))(-1.0)
+
     def loss(value):
         return jnp.sum(cx.spd_from_cholesky_raw(value))
 
