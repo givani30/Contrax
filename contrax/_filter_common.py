@@ -23,6 +23,8 @@ def prepare_filter(model, ys, Q, R, us, x0, P0, has_measurement):
     if ys.ndim != 2 or R.shape != (ys.shape[1], ys.shape[1]):
         raise ValueError("ys and R must have shapes (T, p) and (p, p)")
     arrays = [jnp.asarray(a) for a in (ys, Q, R, us, x0, P0) if a is not None]
+    if hasattr(model, "A"):
+        arrays.extend((model.A, model.B, model.C, model.D))
     if any(jnp.iscomplexobj(a) for a in arrays):
         raise ValueError("Filters require real arrays")
     dtype = jnp.result_type(*arrays, 1.0)
@@ -50,6 +52,13 @@ def prepare_filter(model, ys, Q, R, us, x0, P0, has_measurement):
     if us.ndim < 2 or us.shape[0] != ys.shape[0]:
         raise ValueError("us must have the same leading length as ys")
     known_inputs = hasattr(model, "B") or getattr(model, "input_dim", None) is not None
+    shape = getattr(model, "_input_shape", None)
+    if shape is not None and (
+        us.ndim != len(shape) + 1 or us.shape[1:-1] != shape[:-1]
+    ):
+        raise ValueError(
+            "us trailing dimensions must match the sampled input structure"
+        )
     if known_inputs and us.shape[1:] != u0.shape:
         raise ValueError("us trailing dimensions must match the model input shape")
     flags = (

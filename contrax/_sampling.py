@@ -359,8 +359,8 @@ def sample_system(
         dt=dt_arr,
         state_dim=sys.state_dim,
         input_dim=sys.input_dim,
-        _input_shape=(2, sys.input_dim)
-        if input_interpolation == "foh" and sys.input_dim is not None
+        _input_shape=(2, 0 if sys.input_dim is None else sys.input_dim)
+        if input_interpolation == "foh"
         else None,
         output_dim=sys.output_dim,
         _step_fn=integrate,

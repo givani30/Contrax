@@ -5,6 +5,7 @@ import jax.numpy as jnp
 from jax import Array
 from jax.scipy.linalg import solve_triangular
 
+from contrax._filter_checks import checked, input_status
 from contrax._filter_common import prepare_filter
 from contrax._kalman import _symmetrize
 from contrax.nonlinear import (
@@ -82,6 +83,7 @@ def ukf(
     observation: ObservationFn | None = None,
     has_measurement: Array | None = None,
     solver: UKF | None = None,
+    throw: bool = False,
 ) -> UKFResult:
     """Run an unscented Kalman filter for nonlinear dynamics and observations.
 
@@ -110,6 +112,8 @@ def ukf(
             may contain NaNs; their innovation, predicted measurement,
             innovation covariance and log-likelihood term are zero placeholders.
         solver: Sigma-point settings, default contrax.solvers.UKF().
+
+        throw: Raise on numerical failure; otherwise inspect status.
 
     Returns:
         [UKFResult][contrax.types.UKFResult]: A bundle containing filtered
@@ -161,7 +165,7 @@ def ukf(
 
     # Update-then-predict: x0/P0 is the prior on x_0.
     def update_predict(carry, inputs):
-        x_prior, P_prior = carry
+        x_prior, P_prior, code = carry
         y, u, t, available = inputs
 
         def apply_update():
@@ -209,14 +213,27 @@ def ukf(
 
         # Predict: unscented transform through f from the posterior.
         sigma, Wm, Wc = _sigma_points(x_post, P_post, alpha, beta, kappa)
-        sigma_pred = jax.vmap(lambda s: f(t, s, u))(sigma)
+
+        def transition(state):
+            if callable(getattr(model_or_f, "step", None)):
+                step = model_or_f.step(t, state, u)
+                value = jnp.where(
+                    step.successful, step.x, jnp.full_like(step.x, jnp.nan)
+                )
+                return value, step.status
+            value = f(t, state, u)
+            return value, jnp.where(jnp.all(jnp.isfinite(value)), 0, 3)
+
+        sigma_pred, codes = jax.vmap(transition)(sigma)
+        next_code = codes[jnp.argmax(codes != 0)]
+        code = jnp.where(code != 0, code, next_code)
         x_next = jnp.einsum("i,ij->j", Wm, sigma_pred)
         sigma_pred_centered = sigma_pred - x_next
         P_next = _weighted_covariance(sigma_pred_centered, Wc) + Q
         P_next = _symmetrize(P_next)
         P_cross = _cross_covariance(sigma - x_post, sigma_pred_centered, Wc)
 
-        return (x_next, P_next), (
+        return (x_next, P_next, code), (
             x_post,
             P_post,
             innov,
@@ -229,7 +246,7 @@ def ukf(
         )
 
     (
-        _,
+        (_, _, code),
         (
             x_hats,
             Ps,
@@ -241,8 +258,12 @@ def ukf(
             predicted_state_covariances,
             transition_cross_covariances,
         ),
-    ) = jax.lax.scan(update_predict, (x0, _symmetrize(P0)), (ys, us, ts, flags))
-    return UKFResult(
+    ) = jax.lax.scan(
+        update_predict,
+        (x0, _symmetrize(P0), input_status(P0, Q, R)),
+        (ys, us, ts, flags),
+    )
+    result = UKFResult(
         xs=x_hats,
         Ps=Ps,
         innovations=innovations,
@@ -253,11 +274,15 @@ def ukf(
         predicted_state_means=predicted_state_means,
         predicted_state_covariances=predicted_state_covariances,
         transition_cross_covariances=transition_cross_covariances,
+        solver_status=code,
     )
+    return checked(result, throw, "UKF filter failed; inspect status")
 
 
 def uks(
     result: UKFResult,
+    *,
+    throw: bool = False,
 ) -> RTSResult:
     """Run an unscented Rauch-Tung-Striebel-style smoother.
 
@@ -268,7 +293,11 @@ def uks(
     x_hats = result.xs
     Ps = result.Ps
     if x_hats.shape[0] == 0:
-        return RTSResult(xs=x_hats, Ps=Ps)
+        return checked(
+            RTSResult(xs=x_hats, Ps=Ps, solver_status=result.status),
+            throw,
+            "UKS smoother failed; inspect status",
+        )
 
     def smooth_step(carry, inputs):
         x_s, P_s = carry
@@ -292,4 +321,5 @@ def uks(
     )
     x_smooth = jnp.concatenate([x_smooth_rev[::-1], x_hats[-1:]], axis=0)
     P_smooth = jnp.concatenate([P_smooth_rev[::-1], Ps[-1:]], axis=0)
-    return RTSResult(xs=x_smooth, Ps=P_smooth)
+    smoothed = RTSResult(xs=x_smooth, Ps=P_smooth, solver_status=result.status)
+    return checked(smoothed, throw, "UKS smoother failed; inspect status")

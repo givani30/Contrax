@@ -19,7 +19,6 @@ from contrax._kalman import (  # noqa: F401
     kalman_predict,
     kalman_step,
     kalman_update,
-    rts,
 )
 from contrax._mhe import (  # noqa: F401
     mhe,
@@ -27,6 +26,7 @@ from contrax._mhe import (  # noqa: F401
     mhe_warm_start,
     soft_quadratic_penalty,
 )
+from contrax._rts import rts  # noqa: F401
 from contrax._ukf import ukf, uks  # noqa: F401
 
 __all__ = [

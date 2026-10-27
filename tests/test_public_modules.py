@@ -44,6 +44,8 @@ def test_public_namespaces_export_their_public_surfaces():
     assert types_api.LQRResult is cx.LQRResult
     assert types_api.KalmanGainResult is cx.KalmanGainResult
     assert types_api.KalmanResult is cx.KalmanResult
+    assert types_api.FilterPredictionResult is cx.FilterPredictionResult
+    assert types_api.FilterUpdateResult is cx.FilterUpdateResult
     assert types_api.UKFResult is cx.UKFResult
     assert types_api.RTSResult is cx.RTSResult
     assert types_api.MHEResult is cx.MHEResult

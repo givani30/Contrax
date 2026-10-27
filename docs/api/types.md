@@ -48,6 +48,12 @@ are `.Ps`. A single covariance, such as `kalman_gain(...).P`, remains `.P`.
 An empty trajectory has no final state: accessing `.final_state` raises
 `ValueError`. Apply `vmap` to individual solves when working with batches.
 
+Online prediction helpers return `FilterPredictionResult` with `.x` and `.P`;
+updates and combined steps return `FilterUpdateResult`, which also exposes
+`.innovation`. Both support tuple unpacking and `.status` / `.successful`.
+Batch filter and smoother bundles expose the same status properties. Their
+covariance checks assess symmetry and positive semidefiniteness without repair.
+
 Simulation exposes `.state_times` aligned with `.xs` and `.output_times`
 aligned with `.ys`. `.ts` is the output-time vector used by tuple unpacking.
 

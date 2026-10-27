@@ -46,6 +46,7 @@ def test_batch_matches_online_with_controls_feedthrough_and_missing_data(dtype, 
         assert actual.dtype == dtype
     assert jnp.all(jnp.linalg.eigvalsh(batch.Ps) >= 0)
     assert jnp.all(batch.innovations[1] == 0)
+    assert batch.successful
 
 
 @pytest.mark.parametrize("kind", ["kalman", "ekf", "ukf"])
@@ -134,8 +135,9 @@ def test_batch_iterated_ekf_matches_online_update_and_empty_horizon():
         solver=solver,
     )
     online = cx.ekf_update(h, x0, P0, jnp.array([2.0]), R=R, solver=solver)
-    np.testing.assert_allclose(batch.xs[0], online[0], atol=1e-12)
-    np.testing.assert_allclose(batch.Ps[0], online[1], atol=1e-12)
+    np.testing.assert_allclose(batch.xs[0], online.x, atol=1e-12)
+    np.testing.assert_allclose(batch.Ps[0], online.P, atol=1e-12)
+    assert online.successful
     empty = cx.ekf(
         f,
         jnp.empty((0, 1)),
@@ -160,6 +162,9 @@ def test_batch_iterated_ekf_matches_online_update_and_empty_horizon():
     empty_innovations, empty_likelihood = cx.ukf_diagnostics(empty)
     assert not empty_innovations.nonfinite and not empty_likelihood.nonfinite
     assert empty_likelihood.total_log_likelihood == 0
+    empty_smoother = cx.uks(empty)
+    assert empty_smoother.successful
+    assert not cx.smoother_diagnostics(empty_smoother, empty).nonfinite
 
 
 def test_sampled_foh_batch_filters_match_exact_linear_model_and_default_controls():
@@ -186,3 +191,37 @@ def test_sampled_foh_batch_filters_match_exact_linear_model_and_default_controls
         omitted = filter_fn(model, ys, Q=Q, R=R)
         explicit = filter_fn(model, ys, Q=Q, R=R, us=jnp.zeros_like(us))
         np.testing.assert_allclose(omitted.xs, explicit.xs, atol=1e-12)
+
+
+@pytest.mark.parametrize("filter_fn", [cx.kalman, cx.ekf, cx.ukf])
+def test_filter_status_distinguishes_invalid_noise_and_nonfinite_observations(
+    filter_fn,
+):
+    model = cx.dss([[0.9]], [[1.0]], [[1.0]], [[0.0]], 1.0)
+    eye = jnp.eye(1)
+    results = jax.jit(
+        jax.vmap(lambda q: filter_fn(model, jnp.ones((2, 1)), Q=q * eye, R=eye))
+    )(jnp.array([0.1, -1.0]))
+    np.testing.assert_array_equal(
+        results.status, [0, cx.solvers.SolverStatus.invalid_problem]
+    )
+    assert results.final_state.shape == (2, 1)
+    nonfinite = filter_fn(model, jnp.full((1, 1), jnp.nan), Q=eye, R=eye)
+    assert nonfinite.status == cx.solvers.SolverStatus.numerical_failure
+    if filter_fn is not cx.ukf:
+        update_fn = cx.kalman_update if filter_fn is cx.kalman else cx.ekf_update
+        point = update_fn(model, jnp.zeros(1), eye, jnp.ones(1), R=-2 * eye)
+        assert point.status == cx.solvers.SolverStatus.invalid_problem
+        assert point.x.shape == (1,) and point.P.shape == (1, 1)
+    with pytest.raises(Exception, match="filter failed"):
+        jax.jit(
+            lambda: (
+                filter_fn(
+                    model,
+                    jnp.ones((1, 1)),
+                    Q=-eye,
+                    R=eye,
+                    throw=True,
+                ).xs
+            )
+        )().block_until_ready()

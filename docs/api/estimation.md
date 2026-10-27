@@ -383,6 +383,20 @@ directly to `ekf()` or `ukf()`.
 
 ## Transform Behavior
 
+Batch filters, online helpers and smoothers expose JAX scalar `.status` and
+`.successful` diagnostics. Online prediction results have `.x` and `.P`;
+updates also have `.innovation`. Tuple unpacking remains available. Invalid
+noise or initial covariances return `invalid_problem`; nonfinite outputs or
+loss of positive semidefiniteness return `numerical_failure`. Sampled-model
+integration failures retain their backend status, including iteration limits.
+Shape/configuration errors raise immediately.
+
+`throw=False` returns these diagnostics. With `throw=True`, failure raises
+during execution, including under `jit` when the caller selects only a state
+field. Covariance checks use dtype-scaled roundoff tolerances and never repair
+the covariance. Status decisions are nondifferentiable; objectives on states,
+covariances and likelihoods retain their transform contracts.
+
 Use the one-step helpers when measurements arrive in a runtime loop or when the
 filter needs to live inside a larger `jax.lax.scan`.
 

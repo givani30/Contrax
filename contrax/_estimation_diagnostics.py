@@ -145,7 +145,8 @@ def smoother_diagnostics(
     A numerically healthy smoother satisfies ``P_smooth ≤ P_filtered`` in the
     PSD sense at every step. This function checks that guarantee and surfaces
     the worst-case violation so callers can detect breakdown before trusting
-    smoothed trajectories.
+    smoothed trajectories. Empty passes return empty per-step arrays and NaN
+    extrema; absence of samples does not set nonfinite.
 
     Args:
         smoothed: Output of `rts()` or `uks()`.
@@ -194,9 +195,13 @@ def smoother_diagnostics(
 
     return SmootherDiagnostics(
         covariance_reduction=cov_reduction,
-        min_covariance_reduction=jnp.min(cov_reduction),
+        min_covariance_reduction=jnp.where(
+            cov_reduction.size > 0, jnp.min(cov_reduction, initial=jnp.inf), jnp.nan
+        ),
         state_corrections=state_corrections,
-        max_state_correction=jnp.max(state_corrections),
+        max_state_correction=jnp.where(
+            state_corrections.size > 0, jnp.max(state_corrections, initial=0), jnp.nan
+        ),
         smoothed_min_eigenvalue=smoothed_min_eig,
         nonfinite=nonfinite,
     )

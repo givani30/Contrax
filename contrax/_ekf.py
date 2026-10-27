@@ -4,6 +4,7 @@ import jax
 import jax.numpy as jnp
 from jax import Array
 
+from contrax._filter_checks import checked, input_status, prepare_state
 from contrax._filter_common import prepare_filter, zero_input
 from contrax._kalman import _covariance_update, _measurement_flag, _symmetrize
 from contrax.nonlinear import (
@@ -16,7 +17,27 @@ from contrax.nonlinear import (
     _system_dt,
 )
 from contrax.solvers import EKF
-from contrax.types import KalmanResult
+from contrax.types import FilterPredictionResult, FilterUpdateResult, KalmanResult
+
+
+def _predict(model, x, P, Q, u, t):
+    f = _coerce_dynamics(model)
+
+    def value_and_status(state):
+        if callable(getattr(model, "step", None)):
+            step = model.step(t, state, u)
+            value = jnp.where(step.successful, step.x, jnp.full_like(step.x, jnp.nan))
+            code = step.status
+        else:
+            value = f(t, state, u)
+            code = jnp.where(jnp.all(jnp.isfinite(value)), 0, 3)
+        return value, (value, code)
+
+    # has_aux reuses the transition evaluation for its value, Jacobian and
+    # native integration status; AD still differentiates model data in closures.
+    F, (x_pred, code) = jax.jacfwd(value_and_status, has_aux=True)(x)
+    P_pred = _symmetrize(F @ P @ F.T + Q)
+    return FilterPredictionResult(x_pred, P_pred, code)
 
 
 def ekf_predict(
@@ -27,7 +48,8 @@ def ekf_predict(
     Q: Array,
     u: Array | None = None,
     t: Array | float = 0.0,
-) -> tuple[Array, Array]:
+    throw: bool = False,
+) -> FilterPredictionResult:
     """Predict one extended Kalman filter step.
 
     Args:
@@ -40,15 +62,19 @@ def ekf_predict(
         Q: Process noise covariance. Shape: `(n, n)`.
         t: Current sample time.
 
+        throw: Raise on numerical failure; otherwise inspect status.
+
     Returns:
-        Tuple `(x_pred, P_pred)` with the predicted mean and covariance.
+        FilterPredictionResult: Mean x, covariance P, status and successful.
+        Unpacks as (x_pred, P_pred).
     """
+    x, P, Q = prepare_state(x, P, Q)
     u = zero_input(model_or_f, x.dtype) if u is None else u
-    f = _coerce_dynamics(model_or_f)
-    x_pred = f(t, x, u)
-    F = jax.jacfwd(f, argnums=1)(t, x, u)
-    P_pred = _symmetrize(F @ P @ F.T + Q)
-    return x_pred, P_pred
+    prediction = _predict(model_or_f, x, P, Q, u, t)
+    valid = input_status(P, Q)
+    code = jnp.where(valid != 0, valid, prediction.solver_status)
+    result = FilterPredictionResult(prediction.x, prediction.P, code)
+    return checked(result, throw, "EKF prediction failed; inspect status")
 
 
 def ekf_update(
@@ -62,7 +88,8 @@ def ekf_update(
     t: Array | float = 0.0,
     has_measurement: Array | bool = True,
     solver: EKF | None = None,
-) -> tuple[Array, Array, Array]:
+    throw: bool = False,
+) -> FilterUpdateResult:
     """Update one extended Kalman filter step.
 
     Args:
@@ -77,11 +104,15 @@ def ekf_update(
         solver: Joseph covariance form and number of iterated linearizations.
             `EKF(num_iter=1)` gives the ordinary EKF update.
 
+        throw: Raise on numerical failure; otherwise inspect status.
+
     Returns:
-        Tuple `(x, P, innovation)` with the filtered mean, filtered covariance,
+        FilterUpdateResult: Mean x, covariance P, innovation and status; unpacks
+        as (x, P, innovation), with the filtered mean, filtered covariance,
         and final measurement residual. Missing-measurement steps return the
         prediction and a zero innovation.
     """
+    x_pred, P_pred, R = prepare_state(x_pred, P_pred, R, measurement=y)
     solver = EKF() if solver is None else solver
     if not isinstance(solver, EKF):
         raise TypeError("ekf_update solver must be contrax.solvers.EKF")
@@ -126,11 +157,13 @@ def ekf_update(
     def skip_update():
         return x_pred, P_pred, jnp.zeros_like(y)
 
-    return jax.lax.cond(
+    x, P, innovation = jax.lax.cond(
         _measurement_flag(has_measurement),
         apply_update,
         skip_update,
     )
+    result = FilterUpdateResult(x, P, innovation, input_status(P_pred, R))
+    return checked(result, throw, "EKF update failed; inspect status")
 
 
 def ekf_step(
@@ -148,7 +181,8 @@ def ekf_step(
     observation: ObservationFn | None = None,
     u_measurement: Array | None = None,
     measurement_time: Array | float | None = None,
-) -> tuple[Array, Array, Array]:
+    throw: bool = False,
+) -> FilterUpdateResult:
     """Run one predict-update step of an extended Kalman filter.
 
     Args:
@@ -168,8 +202,11 @@ def ekf_step(
         measurement_time: Observation time. Defaults to t plus the model's
             sample time when available, otherwise t.
 
+        throw: Raise on numerical failure; otherwise inspect status.
+
     Returns:
-        Tuple `(x, P, innovation)` after the step.
+        FilterUpdateResult: Mean x, covariance P, innovation, status and successful.
+        Unpacks as (x, P, innovation).
     """
     u = zero_input(model_or_f, x.dtype) if u is None else u
     if _is_system_model(model_or_f):
@@ -182,11 +219,12 @@ def ekf_step(
                 "ekf_step(f, ..., observation=...) requires an observation function."
             )
         obs = observation
-    x_pred, P_pred = ekf_predict(model_or_f, x, P, u=u, Q=Q, t=t)
+    prediction = ekf_predict(model_or_f, x, P, u=u, Q=Q, t=t)
+    x_pred, P_pred = prediction
     if measurement_time is None:
         dt = _system_dt(model_or_f)
         measurement_time = t if dt is None else t + dt
-    return ekf_update(
+    update = ekf_update(
         obs,
         x_pred,
         P_pred,
@@ -197,6 +235,11 @@ def ekf_step(
         has_measurement=has_measurement,
         solver=solver,
     )
+    code = jnp.where(
+        prediction.solver_status != 0, prediction.solver_status, update.solver_status
+    )
+    result = FilterUpdateResult(update.x, update.P, update.innovation, code)
+    return checked(result, throw, "EKF step failed; inspect status")
 
 
 def ekf(
@@ -211,6 +254,7 @@ def ekf(
     observation: ObservationFn | None = None,
     has_measurement: Array | None = None,
     solver: EKF | None = None,
+    throw: bool = False,
 ) -> KalmanResult:
     """Run an extended Kalman filter for nonlinear dynamics and observations.
 
@@ -236,6 +280,8 @@ def ekf(
         has_measurement: Whole-observation availability flags. Shape: `(T,)`.
             Missing observations may contain NaNs and return zero innovations.
         solver: Joseph covariance form and iterated measurement-update settings.
+
+        throw: Raise on numerical failure; otherwise inspect status.
 
     Returns:
         [KalmanResult][contrax.types.KalmanResult]: A bundle containing
@@ -274,8 +320,8 @@ def ekf(
 
     # Update-then-predict: x0/P0 is the prior on x_0.
     def update_predict(carry, inputs):
-        x_prior, P_prior = carry
-        y, u, t, available = inputs
+        x_prior, P_prior, code = carry
+        y, u, t, available, k = inputs
         x_post, P_post, innov = ekf_update(
             obs,
             x_prior,
@@ -287,12 +333,33 @@ def ekf(
             has_measurement=available,
             solver=solver,
         )
-        x_next, P_next = ekf_predict(model_or_f, x_post, P_post, u=u, Q=Q, t=t)
-        return (x_next, P_next), (x_post, P_post, innov)
 
-    _, (x_hats, Ps, innovations) = jax.lax.scan(
-        update_predict, (x0, P0), (ys, us, ts, flags)
+        def advance():
+            prediction = _predict(model_or_f, x_post, P_post, Q, u, t)
+            return (
+                prediction.x,
+                prediction.P,
+                prediction.solver_status.astype(code.dtype),
+            )
+
+        x_next, P_next, next_code = jax.lax.cond(
+            k + 1 < ys.shape[0],
+            advance,
+            lambda: (x_post, P_post, jnp.zeros_like(code)),
+        )
+        code = jnp.where(code != 0, code, next_code)
+        return (x_next, P_next, code), (x_post, P_post, innov)
+
+    (_, _, code), (x_hats, Ps, innovations) = jax.lax.scan(
+        update_predict,
+        (x0, P0, input_status(P0, Q, R)),
+        (ys, us, ts, flags, jnp.arange(ys.shape[0])),
     )
-    return KalmanResult(
-        xs=x_hats, Ps=Ps, innovations=innovations, has_measurement=flags
+    result = KalmanResult(
+        xs=x_hats,
+        Ps=Ps,
+        innovations=innovations,
+        has_measurement=flags,
+        solver_status=code,
     )
+    return checked(result, throw, "EKF filter failed; inspect status")

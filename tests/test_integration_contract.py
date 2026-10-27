@@ -82,6 +82,19 @@ def test_simulation_and_sampled_limits_report_status_and_checked_failures():
     )
     assert result.status == cx.solvers.SolverStatus.max_steps_reached
     assert not result.successful
+    prediction = cx.ekf_predict(
+        sampled, jnp.ones(1), jnp.eye(1), Q=jnp.eye(1), u=jnp.zeros(1)
+    )
+    assert prediction.status == cx.solvers.SolverStatus.max_steps_reached
+    for filter_fn in (cx.ekf, cx.ukf):
+        filtered = filter_fn(
+            sampled,
+            jnp.ones((2, 1)),
+            Q=jnp.eye(1),
+            R=jnp.eye(1),
+            us=jnp.zeros((2, 1)),
+        )
+        assert filtered.status == cx.solvers.SolverStatus.max_steps_reached
     trajectory = cx.simulate(
         sampled, jnp.ones(1), lambda t, x: jnp.zeros(1), num_steps=3
     )
@@ -105,6 +118,17 @@ def test_zero_horizons_and_response_wrappers_keep_integration_controls():
     result = cx.impulse_response(d, num_steps=0)
     assert result.successful and result.xs.shape == (1, 1) and result.ys.shape == (0, 1)
     np.testing.assert_allclose(result.state_times, [0.0])
+    batched = jax.vmap(
+        lambda state: cx.simulate(
+            d,
+            state,
+            lambda t, x: jnp.zeros(1),
+            num_steps=0,
+        )
+    )(jnp.array([[1.0], [jnp.nan]]))
+    np.testing.assert_array_equal(
+        batched.status, [0, cx.solvers.SolverStatus.numerical_failure]
+    )
     with pytest.raises(ValueError, match="continuous-only"):
         cx.simulate(
             d,

@@ -91,6 +91,8 @@ from contrax.systems import (
     symmetrize_matrix,
 )
 from contrax.types import (
+    FilterPredictionResult,
+    FilterUpdateResult,
     InnovationDiagnostics,
     KalmanGainResult,
     KalmanResult,
@@ -205,6 +207,8 @@ __all__ = [
     "SmootherDiagnostics",
     "KalmanGainResult",
     "KalmanResult",
+    "FilterPredictionResult",
+    "FilterUpdateResult",
     "LikelihoodDiagnostics",
     "UKFResult",
     "RTSResult",

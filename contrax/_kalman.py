@@ -4,11 +4,17 @@ import jax
 import jax.numpy as jnp
 from jax import Array
 
+from contrax._filter_checks import checked, input_status, prepare_state
 from contrax._filter_common import prepare_filter
 from contrax._riccati import dare
 from contrax.core import DiscLTI
 from contrax.solvers import DARE, Kalman
-from contrax.types import KalmanGainResult, KalmanResult, RTSResult
+from contrax.types import (
+    FilterPredictionResult,
+    FilterUpdateResult,
+    KalmanGainResult,
+    KalmanResult,
+)
 
 
 def _symmetrize(X: Array) -> Array:
@@ -39,7 +45,8 @@ def kalman_predict(
     *,
     Q: Array,
     u: Array | None = None,
-) -> tuple[Array, Array]:
+    throw: bool = False,
+) -> FilterPredictionResult:
     """Predict one linear Kalman filter step.
 
     Args:
@@ -50,13 +57,18 @@ def kalman_predict(
         u: Optional input for the transition. Shape: `(m,)`. If omitted, the
             input term is zero.
 
+        throw: Raise on numerical failure; otherwise inspect status.
+
     Returns:
-        Tuple `(x_pred, P_pred)` with the predicted mean and covariance.
+        FilterPredictionResult: Mean x, covariance P, status and successful.
+        Unpacks as (x_pred, P_pred).
     """
+    x, P, Q = prepare_state(x, P, Q)
     u = _zero_input(sys, x) if u is None else u
     x_pred = sys.A @ x + sys.B @ u
     P_pred = _symmetrize(sys.A @ P @ sys.A.T + Q)
-    return x_pred, P_pred
+    result = FilterPredictionResult(x_pred, P_pred, input_status(P, Q))
+    return checked(result, throw, "Kalman prediction failed; inspect status")
 
 
 def kalman_update(
@@ -69,7 +81,8 @@ def kalman_update(
     u: Array | None = None,
     has_measurement: Array | bool = True,
     solver: Kalman | None = None,
-) -> tuple[Array, Array, Array]:
+    throw: bool = False,
+) -> FilterUpdateResult:
     """Update one linear Kalman filter step.
 
     `has_measurement=False` returns the predicted state and covariance without
@@ -87,11 +100,15 @@ def kalman_update(
         has_measurement: Whether to apply the measurement update.
         solver: Joseph (default) or compact covariance-update configuration.
 
+        throw: Raise on numerical failure; otherwise inspect status.
+
     Returns:
-        Tuple `(x, P, innovation)` with the filtered mean, filtered covariance,
+        FilterUpdateResult: Mean x, covariance P, innovation and status; unpacks
+        as (x, P, innovation), with the filtered mean, filtered covariance,
         and measurement residual. Missing-measurement steps return a zero
         innovation with the same shape as `y`.
     """
+    x_pred, P_pred, R = prepare_state(x_pred, P_pred, R, measurement=y)
     u = _zero_input(sys, x_pred) if u is None else u
     solver = Kalman() if solver is None else solver
     if not isinstance(solver, Kalman):
@@ -112,11 +129,13 @@ def kalman_update(
     def skip_update():
         return x_pred, P_pred, jnp.zeros_like(y)
 
-    return jax.lax.cond(
+    x, P, innovation = jax.lax.cond(
         _measurement_flag(has_measurement),
         apply_update,
         skip_update,
     )
+    result = FilterUpdateResult(x, P, innovation, input_status(P_pred, R))
+    return checked(result, throw, "Kalman update failed; inspect status")
 
 
 def kalman_step(
@@ -131,7 +150,8 @@ def kalman_step(
     has_measurement: Array | bool = True,
     solver: Kalman | None = None,
     u_measurement: Array | None = None,
-) -> tuple[Array, Array, Array]:
+    throw: bool = False,
+) -> FilterUpdateResult:
     """Run one predict-update step of a linear Kalman filter.
 
     This is the online counterpart to `kalman()`. It is a pure array function,
@@ -151,11 +171,15 @@ def kalman_step(
         u_measurement: Input at the measurement time for direct feedthrough.
             Defaults to u; pass separately when consecutive controls differ.
 
+        throw: Raise on numerical failure; otherwise inspect status.
+
     Returns:
-        Tuple `(x, P, innovation)` after the step.
+        FilterUpdateResult: Mean x, covariance P, innovation, status and successful.
+        Unpacks as (x, P, innovation).
     """
-    x_pred, P_pred = kalman_predict(sys, x, P, Q=Q, u=u)
-    return kalman_update(
+    prediction = kalman_predict(sys, x, P, Q=Q, u=u)
+    x_pred, P_pred = prediction
+    update = kalman_update(
         sys,
         x_pred,
         P_pred,
@@ -165,6 +189,11 @@ def kalman_step(
         has_measurement=has_measurement,
         solver=solver,
     )
+    code = jnp.where(
+        prediction.solver_status != 0, prediction.solver_status, update.solver_status
+    )
+    result = FilterUpdateResult(update.x, update.P, update.innovation, code)
+    return checked(result, throw, "Kalman step failed; inspect status")
 
 
 def kalman_gain(
@@ -207,6 +236,8 @@ def kalman_gain(
         ... )
         >>> design = cx.kalman_gain(sys, 0.001 * jnp.eye(2), 0.01 * jnp.eye(2))
     """
+    if not isinstance(sys, DiscLTI):
+        raise TypeError("kalman_gain requires a discrete LTI system")
     design = dare(sys.A.T, sys.C.T, Q, R, solver=solver, throw=throw)
     P_pred = design.S
     innovation_cov = sys.C @ P_pred @ sys.C.T + R
@@ -232,6 +263,7 @@ def kalman(
     us: Array | None = None,
     has_measurement: Array | None = None,
     solver: Kalman | None = None,
+    throw: bool = False,
 ) -> KalmanResult:
     """Run a linear discrete-time Kalman filter.
 
@@ -256,6 +288,8 @@ def kalman(
         has_measurement: Whole-observation availability flags. Shape: `(T,)`.
             Missing observations may contain NaNs and return zero innovations.
         solver: Joseph (default) or compact covariance-update configuration.
+
+        throw: Raise on numerical failure; otherwise inspect status.
 
     Returns:
         [KalmanResult][contrax.types.KalmanResult]: A bundle containing
@@ -289,97 +323,25 @@ def kalman(
     # predicts forward to give the prior on x_{k+1}.
     def update_predict(carry, inputs):
         x_prior, P_prior = carry
-        y, u, available = inputs
+        y, u, available, k = inputs
         x_post, P_post, innov = kalman_update(
             sys, x_prior, P_prior, y, R=R, u=u, has_measurement=available, solver=solver
         )
-        x_next, P_next = kalman_predict(sys, x_post, P_post, Q=Q, u=u)
+        x_next, P_next = jax.lax.cond(
+            k + 1 < ys.shape[0],
+            lambda: tuple(kalman_predict(sys, x_post, P_post, Q=Q, u=u)),
+            lambda: (x_post, P_post),
+        )
         return (x_next, P_next), (x_post, P_post, innov)
 
     _, (x_hats, Ps, innovations) = jax.lax.scan(
-        update_predict, (x0, P0), (ys, us, flags)
+        update_predict, (x0, P0), (ys, us, flags, jnp.arange(ys.shape[0]))
     )
-    return KalmanResult(
-        xs=x_hats, Ps=Ps, innovations=innovations, has_measurement=flags
+    result = KalmanResult(
+        xs=x_hats,
+        Ps=Ps,
+        innovations=innovations,
+        has_measurement=flags,
+        solver_status=input_status(P0, Q, R),
     )
-
-
-def rts(
-    sys: DiscLTI,
-    result: KalmanResult,
-    *,
-    Q: Array,
-    us: Array | None = None,
-) -> RTSResult:
-    """Run a Rauch-Tung-Striebel smoother on filtered Kalman results.
-
-    Applies the standard backward smoothing pass to the output of `kalman()`
-    using the same process model and process noise covariance.
-
-    This is an offline smoothing primitive rather than an online filter.
-    `Q` should match the covariance used in the forward `kalman()` pass;
-    for deterministic dynamics, pass zeros rather than omitting the term.
-
-    Args:
-        sys: Discrete-time linear system used in the forward filter.
-        result: Output of `kalman()`.
-        Q: Process noise covariance used by the forward filter.
-        us: Controls from the forward filter. Shape: `(T, m)`. The last input
-            is unused; defaults to zeros.
-
-    Returns:
-        [RTSResult][contrax.types.RTSResult]: A bundle containing smoothed
-            state means and covariances.
-
-    Examples:
-        >>> import jax.numpy as jnp
-        >>> import contrax as cx
-        >>> sys = cx.dss(
-        ...     jnp.array([[1.0, 0.1], [0.0, 1.0]]),
-        ...     jnp.array([[0.0], [0.1]]),
-        ...     jnp.eye(2),
-        ...     jnp.zeros((2, 1)),
-        ...     dt=0.1,
-        ... )
-        >>> filtered = cx.kalman(
-        ...     sys, jnp.zeros((20, 2)), Q=1e-3 * jnp.eye(2), R=1e-2 * jnp.eye(2)
-        ... )
-        >>> smoothed = cx.rts(sys, filtered, Q=0.001 * jnp.eye(2))
-    """
-    x_hats = result.xs  # (T, n)
-    Ps = result.Ps  # (T, n, n)
-    if x_hats.shape[0] == 0:
-        return RTSResult(xs=x_hats, Ps=Ps)
-    us = (
-        jnp.zeros((x_hats.shape[0], sys.B.shape[1]), dtype=x_hats.dtype)
-        if us is None
-        else us
-    )
-    if us.shape != (x_hats.shape[0], sys.B.shape[1]):
-        raise ValueError("us must have shape (T, m)")
-
-    def smooth_step(carry, inputs):
-        x_s, P_s = carry
-        x_f, P_f, u = inputs
-
-        # Predicted mean/cov from forward pass
-        x_pred = sys.A @ x_f + sys.B @ u
-        P_pred = sys.A @ P_f @ sys.A.T + Q
-
-        G = jnp.linalg.solve(
-            P_pred.T, sys.A @ P_f.T
-        ).T  # smoother gain: P_f A^T P_pred^{-1}
-        x_s_new = x_f + G @ (x_s - x_pred)
-        P_s_new = P_f + G @ (P_s - P_pred) @ G.T
-        return (x_s_new, P_s_new), (x_s_new, P_s_new)
-
-    # Initialise smoother at last filtered estimate
-    init = (x_hats[-1], Ps[-1])
-    # Scan backwards over t = T-2, ..., 0
-    _, (x_smooth_rev, P_smooth_rev) = jax.lax.scan(
-        smooth_step, init, (x_hats[:-1][::-1], Ps[:-1][::-1], us[:-1][::-1])
-    )
-    # Prepend the last (unsmoothed) estimate and reverse
-    x_smooth = jnp.concatenate([x_smooth_rev[::-1], x_hats[-1:]], axis=0)
-    P_smooth = jnp.concatenate([P_smooth_rev[::-1], Ps[-1:]], axis=0)
-    return RTSResult(xs=x_smooth, Ps=P_smooth)
+    return checked(result, throw, "Kalman filter failed; inspect status")
