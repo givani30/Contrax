@@ -17,6 +17,8 @@ def _finite_continuous(A, forcing, horizon):
     # Reference: Van Loan (1978), "Computing Integrals Involving the Matrix
     # Exponential", IEEE TAC.
     n = A.shape[0]
+    if n == 0:
+        return A, forcing
     block = jnp.block([[A, forcing], [jnp.zeros_like(A), -A.T]])
     exponential = jax.scipy.linalg.expm(block * horizon)
     phi = exponential[:n, :n]

@@ -260,20 +260,22 @@ def test_feedback_preserves_bcd(disc_sys):
     assert jnp.allclose(cl.dt, disc_sys.dt)
 
 
-def test_feedback_continuous_preserves_bcd():
-    sys = cx.ss(
-        A_CONT,
-        B_CONT,
-        C_CONT,
-        D_CONT,
+def test_state_feedback_preserves_physical_feedthrough_behavior():
+    """With u=v-Kx, the closed-loop output must equal the physical plant output."""
+    K, x, v = (
+        jnp.array([[0.1, 0.2, 0.3]]),
+        jnp.array([0.4, -0.2, 0.1]),
+        jnp.array([0.3]),
     )
-    L = jnp.zeros((1, 3))
-    cl = cx.feedback(sys, L)
-
-    assert isinstance(cl, cx.ContLTI)
-    assert jnp.allclose(cl.B, sys.B)
-    assert jnp.allclose(cl.C, sys.C)
-    assert jnp.allclose(cl.D, sys.D)
+    systems = (
+        cx.ss(A_CONT, B_CONT, C_CONT, [[0.25]]),
+        cx.dss(A_CONT, B_CONT, C_CONT, [[0.25]], 0.1),
+    )
+    for sys in systems:
+        cl, u = cx.state_feedback(sys, K), v - K @ x
+        assert jnp.allclose(cl.A @ x + cl.B @ v, sys.A @ x + sys.B @ u)
+        assert jnp.allclose(cl.C @ x + cl.D @ v, sys.C @ x + sys.D @ u)
+        assert jnp.array_equal(cl.B, sys.B) and jnp.array_equal(cl.D, sys.D)
 
 
 def test_feedback_continuous_lqr_closed_loop_stable():

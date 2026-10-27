@@ -222,6 +222,13 @@ $$
 Then use `c2d()` when the downstream workflow is discrete-time design or
 simulation.
 
+`c2d` converts continuous LTI matrices. For nonlinear/PHS vector fields,
+`sample_system` integrates dynamics over each sample interval and returns a
+discrete model with the same canonical dynamics/output callback contract.
+Both require a real, finite positive sample period. `dss` stores a supplied
+period in the real matrix precision; `c2d` promotes explicit higher-precision
+array periods together with its computed realization.
+
 The `c2d()` methods are:
 
 - `zoh`: exact held-input discretization through the native differentiable
@@ -271,8 +278,8 @@ The important user-facing transform contracts here are:
   `vmap`
 - [`DiscLTI.dt`](#contrax.systems.DiscLTI.dt) stays as an array leaf rather
   than static metadata, which makes batching over systems more natural
-- composition helpers are ordinary state-space algebra once family and shape
-  checks pass
+- composition helpers use state-space algebra with checked family, shape and
+  matching-period contracts; period mismatch checks remain active under jit
 
 ## Numerical Notes
 

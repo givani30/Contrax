@@ -46,6 +46,9 @@ def test_invalid_cost_and_unstabilizable_problem_have_compiled_status(solve):
         invalid = operation(one, one, one, -one)
         assert invalid.status == SolverStatus.invalid_problem
         assert not invalid.successful
+        stable = -one if solve is cx.care else one * 0.5
+        tiny_invalid = operation(stable, one, -1e-13 * one, one)
+        assert tiny_invalid.status == SolverStatus.invalid_problem
         failed = operation(one, jnp.zeros_like(one), one, one)
         assert not failed.successful
     with pytest.raises(Exception, match="Riccati solve failed"):

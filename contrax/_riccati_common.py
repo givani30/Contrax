@@ -43,6 +43,20 @@ def _validate_matrices(A, B, Q, R):
     return tuple(x.astype(dtype) for x in (A, B, Q, R))
 
 
+def _positive_cost(matrix, *, strict=False):
+    # Domain checks use matrix-scale roundoff, independently of the user's
+    # equation/stopping tolerances. Small costs cannot admit negative weights
+    # merely because their magnitude is below the absolute residual tolerance.
+    matrix = jax.lax.stop_gradient(matrix)
+    finite = jnp.all(jnp.isfinite(matrix))
+    safe = jnp.where(jnp.isfinite(matrix), matrix, 0)
+    scale = jnp.max(jnp.abs(safe))
+    tolerance = 32 * matrix.shape[0] * jnp.finfo(matrix.dtype).eps * scale
+    symmetric = jnp.max(jnp.abs(safe - safe.T)) <= tolerance
+    smallest = jnp.min(jnp.linalg.eigvalsh(0.5 * safe + 0.5 * safe.T))
+    return finite & symmetric & (smallest > 0 if strict else smallest >= -tolerance)
+
+
 def _result(A, B, Q, R, S, steps, solver, *, continuous, throw):
     K = jnp.linalg.solve(R, B.T @ S) if continuous else _lqr_gain(A, B, S, R)
     closed_loop = A - B @ K
@@ -55,17 +69,15 @@ def _result(A, B, Q, R, S, steps, solver, *, continuous, throw):
         terms = (S, -Q, -A.T @ S @ A, A.T @ S @ B @ K)
     residual_norm = jnp.max(jnp.abs(sum(terms)))
     scale = sum(jnp.max(jnp.abs(term)) for term in terms)
-    symmetric = (
-        jnp.max(jnp.abs(Q - Q.T)) <= solver.atol + solver.rtol * jnp.max(jnp.abs(Q))
-    ) & (jnp.max(jnp.abs(R - R.T)) <= solver.atol + solver.rtol * jnp.max(jnp.abs(R)))
-    valid = (
-        symmetric
-        & (jnp.min(jnp.linalg.eigvalsh(_symmetrize(Q))) >= -solver.atol)
-        & (jnp.min(jnp.linalg.eigvalsh(_symmetrize(R))) > 0)
-    )
+    valid = _positive_cost(Q) & _positive_cost(R, strict=True)
     stable = jnp.all(jnp.real(poles) < 0 if continuous else jnp.abs(poles) < 1)
     finite = jnp.all(jnp.isfinite(S)) & jnp.all(jnp.isfinite(K)) & jnp.isfinite(scale)
-    good = finite & stable & (residual_norm <= solver.atol + solver.rtol * scale)
+    good = (
+        finite
+        & stable
+        & _positive_cost(S)
+        & (residual_norm <= solver.atol + solver.rtol * scale)
+    )
     exhausted = False if continuous else steps >= solver.max_steps
     status = jnp.where(
         ~valid,

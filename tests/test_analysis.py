@@ -57,6 +57,15 @@ def test_ctrb_and_obsv_work_for_discrete_systems():
     assert cx.obsv(sys).shape == (2, 2)
     assert jnp.linalg.matrix_rank(cx.ctrb(sys)) == 2
     assert jnp.linalg.matrix_rank(cx.obsv(sys)) == 2
+    # A static gain has no state-space directions, but remains a valid LTI.
+    zero = jnp.zeros((0, 0))
+    static = cx.dss(zero, jnp.zeros((0, 1)), jnp.zeros((1, 0)), [[2.0]], 0.1)
+    assert cx.ctrb(static).shape == cx.obsv(static).shape == (0, 0)
+    assert cx.poles(static).shape == (0,)
+    np.testing.assert_allclose(cx.dcgain(static), [[2.0]])
+    assert cx.ctrb_gramian(static).successful
+    continuous = cx.ss(static.A, static.B, static.C, static.D)
+    assert cx.obsv_gramian(continuous, t=1.0).successful
 
 
 def test_poles_matches_state_matrix_eigenvalues():
@@ -163,6 +172,18 @@ def test_frequency_analysis_is_jittable():
 
     assert jitted.shape == (3, 1, 1)
     assert np.iscomplexobj(np.asarray(jitted))
+
+    # |0.5+3/(2+j*w)|² = 0.25+15/(4+w²), independent scalar reference.
+    def loss(w):
+        return jnp.sum(jnp.abs(cx.freqresp(sys, w)) ** 2)
+
+    expected = -30 * omega / (4 + omega**2) ** 2
+    assert jnp.allclose(jax.jit(jax.grad(loss))(omega), expected, atol=1e-12)
+    assert jnp.allclose(jax.jacfwd(loss)(omega), expected, atol=1e-12)
+    assert cx.freqresp(sys, jnp.empty(0)).shape == (0, 1, 1)
+    model32 = cx.ss(*(a.astype(jnp.float32) for a in (sys.A, sys.B, sys.C, sys.D)))
+    assert cx.freqresp(model32, omega.astype(jnp.float32)).dtype == jnp.complex64
+    assert cx.dcgain(model32).dtype == jnp.complex64
 
 
 def test_scalar_controllability_gramian_matches_analytic_value():

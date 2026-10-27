@@ -134,21 +134,23 @@ $$
 
 ### Closed-Loop Models
 
-`state_feedback()` applies the gain directly to the plant matrices.
+`state_feedback()` applies u = v - Kx and retains v as the external input.
+`feedback()` is an alias for this state-feedback operation.
 
 For discrete systems,
 
 $$
-x_{k+1} = (A - B K) x_k
+x_{k+1} = (A - B K) x_k + B v_k
 $$
 
 and for continuous systems,
 
 $$
-\dot{x} = (A - B K) x
+\dot{x} = (A - B K) x + B v
 $$
 
-That is the model whose poles appear in
+The output is y = (C - DK)x + Dv. Direct feedthrough changes the closed-loop
+output matrix; B and D remain the external-input maps. These dynamics have the poles in
 [`LQRResult.poles`](types.md#contrax.types.LQRResult.poles).
 
 <figure class="contrax-figure">

@@ -52,6 +52,13 @@ def test_dss_round_trip():
     dsys = cx.dss(A_CONT, B_CONT, C_CONT, D_CONT, DT)
     assert isinstance(dsys, cx.DiscLTI)
     assert dsys.dt.shape == ()
+    sys32 = cx.ss(*(a.astype(jnp.float32) for a in (A_CONT, B_CONT, C_CONT, D_CONT)))
+    for method in ("zoh", "tustin"):
+        sampled = cx.c2d(sys32, DT, method=method)
+        assert all(
+            a.dtype == jnp.float32
+            for a in (sampled.A, sampled.B, sampled.C, sampled.D, sampled.dt)
+        )
 
 
 def test_dt_is_dynamic_leaf():
@@ -64,6 +71,13 @@ def test_dt_is_dynamic_leaf():
     leaves = jax.tree_util.tree_leaves(dsys)
     dt_leaves = [leaf for leaf in leaves if leaf.shape == ()]
     assert len(dt_leaves) >= 1
+    for invalid in (0.0, -1.0, jnp.inf, jnp.nan):
+        with pytest.raises(ValueError, match="finite and positive"):
+            cx.dss(A_CONT, B_CONT, C_CONT, D_CONT, invalid)
+    with pytest.raises(Exception, match="finite and positive"):
+        jax.jit(lambda dt: cx.dss(A_CONT, B_CONT, C_CONT, D_CONT, dt).A)(
+            jnp.array(-1.0)
+        ).block_until_ready()
 
 
 # -- c2d ZOH: Octave-verified numerical targets --------------------------------

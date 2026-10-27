@@ -6,7 +6,7 @@ from jax.typing import ArrayLike
 
 from contrax._place import place  # noqa: F401 — re-exported
 from contrax._riccati import care, dare  # noqa: F401 — re-exported
-from contrax.core import ContLTI, DiscLTI
+from contrax.core import ContLTI, DiscLTI, dss, ss
 from contrax.solvers import CARE, DARE
 from contrax.types import LQRResult
 
@@ -194,8 +194,9 @@ def lqi(
 def state_feedback(sys: DiscLTI | ContLTI, K: Array) -> DiscLTI | ContLTI:
     """Construct the closed-loop system under state feedback.
 
-    Returns a new LTI system with `A_cl = A - B @ K` and unchanged `B`, `C`,
-    `D`, and, for discrete systems, `dt`.
+    Applies u = v - Kx, retaining v as the external input. The new matrices are
+    A_cl = A - BK and C_cl = C - DK, with B, D and discrete dt unchanged.
+    Nonzero direct feedthrough therefore contributes to the closed-loop output.
 
     This is a pure functional constructor rather than a simulation routine. It
     dispatches on either [DiscLTI][contrax.systems.DiscLTI] or
@@ -212,6 +213,8 @@ def state_feedback(sys: DiscLTI | ContLTI, K: Array) -> DiscLTI | ContLTI:
             closed-loop dynamics.
 
     Examples:
+        >>> import jax
+        >>> jax.config.update("jax_enable_x64", True)
         >>> import jax.numpy as jnp
         >>> import contrax as cx
         >>> sys = cx.dss(
@@ -224,19 +227,24 @@ def state_feedback(sys: DiscLTI | ContLTI, K: Array) -> DiscLTI | ContLTI:
         >>> result = cx.lqr(sys, jnp.eye(2), jnp.array([[1.0]]))
         >>> closed_loop = cx.state_feedback(sys, result.K)
     """
+    if not isinstance(sys, (DiscLTI, ContLTI)):
+        raise TypeError(f"Expected DiscLTI or ContLTI, got {type(sys)}")
+    K = jnp.asarray(K)
+    if K.shape != (sys.B.shape[1], sys.A.shape[0]):
+        raise ValueError("K must have shape (number of inputs, number of states)")
     if isinstance(sys, DiscLTI):
-        return DiscLTI(
+        return dss(
             A=sys.A - sys.B @ K,
             B=sys.B,
-            C=sys.C,
+            C=sys.C - sys.D @ K,
             D=sys.D,
             dt=sys.dt,
         )
     elif isinstance(sys, ContLTI):
-        return ContLTI(
+        return ss(
             A=sys.A - sys.B @ K,
             B=sys.B,
-            C=sys.C,
+            C=sys.C - sys.D @ K,
             D=sys.D,
         )
     else:
@@ -244,10 +252,5 @@ def state_feedback(sys: DiscLTI | ContLTI, K: Array) -> DiscLTI | ContLTI:
 
 
 def feedback(sys: DiscLTI | ContLTI, K: Array) -> DiscLTI | ContLTI:
-    """Alias for `state_feedback()`.
-
-    This alias remains available for MATLAB-style ergonomics, but the more
-    explicit `state_feedback()` name is preferred in new Contrax code because it
-    distinguishes gain application from general closed-loop interconnection.
-    """
+    """Apply u = v - Kx to an LTI model; alias for state_feedback()."""
     return state_feedback(sys, K)

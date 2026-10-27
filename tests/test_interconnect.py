@@ -135,14 +135,14 @@ def test_parallel_rejects_dt_mismatch():
         B=jnp.array([[1.0]]),
         C=jnp.array([[1.0]]),
         D=jnp.zeros((1, 1)),
-        dt=0.1,
+        dt=1e-12,
     )
     sys2 = cx.dss(
         A=jnp.array([[0.8]]),
         B=jnp.array([[1.0]]),
         C=jnp.array([[1.0]]),
         D=jnp.zeros((1, 1)),
-        dt=0.2,
+        dt=2e-12,
     )
 
     with pytest.raises(ValueError, match="matching dt"):
@@ -211,3 +211,12 @@ def test_discrete_interconnect_is_jittable_with_traced_dt():
     assert isinstance(result, cx.DiscLTI)
     assert result.A.shape == (2, 2)
     assert jnp.allclose(result.dt, sys1.dt)
+    with pytest.raises(Exception, match="matching dt"):
+        jax.jit(
+            lambda dt: (
+                cx.parallel(
+                    sys1,
+                    cx.dss(sys2.A, sys2.B, sys2.C, sys2.D, dt),
+                ).A
+            )
+        )(jnp.asarray(0.2)).block_until_ready()

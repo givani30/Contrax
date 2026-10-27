@@ -2,27 +2,36 @@
 
 from __future__ import annotations
 
+import equinox as eqx
 import jax.numpy as jnp
-import numpy as np
-from jax import Array
 from jax import core as jax_core
 
 from contrax.core import ContLTI, DiscLTI
 
 
-def _is_tracing(*arrays: Array) -> bool:
-    return any(isinstance(arr, jax_core.Tracer) for arr in arrays)
-
-
-def _check_same_family(sys2: DiscLTI | ContLTI, sys1: DiscLTI | ContLTI) -> None:
+def _check_same_family(sys2: DiscLTI | ContLTI, sys1: DiscLTI | ContLTI):
     if isinstance(sys2, DiscLTI) and isinstance(sys1, DiscLTI):
-        if not _is_tracing(sys2.dt, sys1.dt) and not np.allclose(
-            np.asarray(sys2.dt), np.asarray(sys1.dt)
-        ):
-            raise ValueError("Discrete interconnections require matching dt.")
-        return
+        dt1, dt2 = sys1.dt, sys2.dt
+        if dt1.ndim != 0 or dt2.ndim != 0:
+            raise ValueError("Discrete sample periods must be scalar")
+        epsilon = max(jnp.finfo(dt1.dtype).eps, jnp.finfo(dt2.dtype).eps)
+        mismatch = (
+            ~jnp.isfinite(dt1)
+            | ~jnp.isfinite(dt2)
+            | (dt1 <= 0)
+            | (dt2 <= 0)
+            | (
+                jnp.abs(dt1 - dt2)
+                > 8 * epsilon * jnp.maximum(jnp.abs(dt1), jnp.abs(dt2))
+            )
+        )
+        if not isinstance(mismatch, jax_core.Tracer) and bool(mismatch):
+            raise ValueError(
+                "Discrete interconnections require finite positive matching dt."
+            )
+        return mismatch
     if isinstance(sys2, ContLTI) and isinstance(sys1, ContLTI):
-        return
+        return jnp.asarray(False)
     raise TypeError(
         "Interconnection requires both systems to be continuous or both discrete."
     )
@@ -42,7 +51,7 @@ def series(sys2: DiscLTI | ContLTI, sys1: DiscLTI | ContLTI) -> DiscLTI | ContLT
         [DiscLTI][contrax.systems.DiscLTI] |
             [ContLTI][contrax.systems.ContLTI]: Interconnected system.
     """
-    _check_same_family(sys2, sys1)
+    mismatch = _check_same_family(sys2, sys1)
     if sys1.C.shape[0] != sys2.B.shape[1]:
         raise ValueError(
             "Series interconnection requires sys1 output dimension to match "
@@ -64,7 +73,10 @@ def series(sys2: DiscLTI | ContLTI, sys1: DiscLTI | ContLTI) -> DiscLTI | ContLT
     D = D2 @ D1
 
     if isinstance(sys1, DiscLTI):
-        return DiscLTI(A=A, B=B, C=C, D=D, dt=sys1.dt)
+        result = DiscLTI(A=A, B=B, C=C, D=D, dt=sys1.dt)
+        return eqx.error_if(
+            result, mismatch, "Discrete interconnections require matching dt"
+        )
     return ContLTI(A=A, B=B, C=C, D=D)
 
 
@@ -85,7 +97,7 @@ def parallel(
         [DiscLTI][contrax.systems.DiscLTI] |
             [ContLTI][contrax.systems.ContLTI]: Interconnected system.
     """
-    _check_same_family(sys1, sys2)
+    mismatch = _check_same_family(sys1, sys2)
     if sys1.B.shape[1] != sys2.B.shape[1]:
         raise ValueError("Parallel interconnection requires matching input dimensions.")
     if sys1.C.shape[0] != sys2.C.shape[0]:
@@ -96,7 +108,9 @@ def parallel(
     A1, B1, C1, D1 = sys1.A, sys1.B, sys1.C, sys1.D
     A2, B2, C2, D2 = sys2.A, sys2.B, sys2.C, sys2.D
     n1, n2 = A1.shape[0], A2.shape[0]
-    sign_arr = jnp.asarray(sign, dtype=A1.dtype)
+    sign_arr = jnp.asarray(sign, dtype=jnp.result_type(A1, A2, D1, D2, sign, 1.0))
+    if sign_arr.ndim != 0:
+        raise ValueError("sign must be scalar")
 
     A = jnp.block(
         [
@@ -109,5 +123,8 @@ def parallel(
     D = D1 + sign_arr * D2
 
     if isinstance(sys1, DiscLTI):
-        return DiscLTI(A=A, B=B, C=C, D=D, dt=sys1.dt)
+        result = DiscLTI(A=A, B=B, C=C, D=D, dt=sys1.dt)
+        return eqx.error_if(
+            result, mismatch, "Discrete interconnections require matching dt"
+        )
     return ContLTI(A=A, B=B, C=C, D=D)

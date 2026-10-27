@@ -72,7 +72,7 @@ def ctrb(sys: DiscLTI | ContLTI) -> Array:
         return A @ block, block
 
     _, blocks = jax.lax.scan(step, B, None, length=n)
-    return jnp.transpose(blocks, (1, 0, 2)).reshape(A.shape[0], -1)
+    return jnp.transpose(blocks, (1, 0, 2)).reshape(n, n * B.shape[1])
 
 
 def obsv(sys: DiscLTI | ContLTI) -> Array:
@@ -100,7 +100,7 @@ def obsv(sys: DiscLTI | ContLTI) -> Array:
         return block @ A, block
 
     _, blocks = jax.lax.scan(step, C, None, length=n)
-    return blocks.reshape(-1, A.shape[0])
+    return blocks.reshape(n * C.shape[0], n)
 
 
 def evalfr(sys: DiscLTI | ContLTI, point: complex | Array) -> Array:
@@ -109,9 +109,10 @@ def evalfr(sys: DiscLTI | ContLTI, point: complex | Array) -> Array:
     For continuous systems this computes `G(s) = C (sI - A)^-1 B + D`. For
     discrete systems it computes `G(z) = C (zI - A)^-1 B + D`.
 
-    This is the first transfer-evaluation helper in Contrax rather than a full
-    transfer-function algebra layer. It is intended for design-time analysis,
-    spot checks, and building higher-level frequency-response tools.
+    Supports jit, vmap, JVP and VJP away from realization poles. The resolvent
+    must be nonsingular; evaluation at a realization pole may return nonfinite
+    values even when a nonminimal realization has a removable cancellation.
+    The matrices and evaluation point determine the promoted complex dtype.
 
     Args:
         sys: Continuous or discrete LTI system.
@@ -120,7 +121,11 @@ def evalfr(sys: DiscLTI | ContLTI, point: complex | Array) -> Array:
     Returns:
         Array: Transfer matrix evaluated at `point`. Shape: `(p, m)`.
     """
-    point = jnp.asarray(point, dtype=jnp.result_type(sys.A.dtype, 1j))
+    if not isinstance(sys, (ContLTI, DiscLTI)):
+        raise TypeError("evalfr requires a continuous or discrete LTI model")
+    point = jnp.asarray(point, dtype=jnp.result_type(sys.A, point, 1j))
+    if point.ndim != 0:
+        raise ValueError("point must be scalar; use vmap or freqresp for a grid")
     n = sys.A.shape[0]
     identity = jnp.eye(n, dtype=point.dtype)
     A = sys.A.astype(point.dtype)
@@ -138,9 +143,9 @@ def freqresp(sys: DiscLTI | ContLTI, omega: Array) -> Array:
     Discrete systems are evaluated on the unit circle at
     `z = exp(j omega dt)`.
 
-    This is a basic state-space frequency-response helper. It returns the
-    complex transfer matrix at each frequency but does not yet format Bode or
-    Nyquist plots for you.
+    Returns the complex transfer matrix at each frequency, with jit/vmap and
+    forward/reverse derivatives wherever the resolvents are nonsingular.
+    An empty frequency vector returns shape (0, p, m).
 
     Args:
         sys: Continuous or discrete LTI system.
@@ -149,7 +154,10 @@ def freqresp(sys: DiscLTI | ContLTI, omega: Array) -> Array:
     Returns:
         Array: Complex frequency response. Shape: `(k, p, m)`.
     """
-    omega = jnp.asarray(omega, dtype=float)
+    omega = jnp.asarray(omega)
+    if omega.ndim != 1 or jnp.iscomplexobj(omega):
+        raise ValueError("omega must be a real vector of angular frequencies")
+    omega = omega.astype(jnp.result_type(sys.A.real, omega, 1.0))
     if isinstance(sys, ContLTI):
         points = 1j * omega
     else:
@@ -173,7 +181,7 @@ def dcgain(sys: DiscLTI | ContLTI) -> Array:
     Returns:
         Array: DC gain matrix. Shape: `(p, m)`.
     """
-    point = jnp.array(0.0) if isinstance(sys, ContLTI) else jnp.array(1.0)
+    point = 0.0 if isinstance(sys, ContLTI) else 1.0
     return evalfr(sys, point)
 
 

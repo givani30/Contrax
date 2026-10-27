@@ -139,7 +139,9 @@ def lyapunov(A, Q, *, continuous, solver=None, throw=False):
     dtype = jnp.result_type(A, Q, 1.0)
     A, Q = A.astype(dtype), Q.astype(dtype)
     if A.shape[0] == 0:
-        return LyapunovResult(Q, jnp.asarray(0), jnp.asarray(0), jnp.asarray(0.0))
+        return LyapunovResult(
+            Q, jnp.asarray(0), jnp.asarray(0), jnp.asarray(0.0, dtype=dtype)
+        )
     X, (steps, status) = solve_lyapunov(A, Q, continuous=continuous, solver=solver)
     residual, _ = _residual(A, Q, X, continuous)
     result = LyapunovResult(X=X, status=status, num_steps=steps, residual_norm=residual)

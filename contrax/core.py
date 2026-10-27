@@ -79,6 +79,17 @@ def _lti_arrays(A, B, C, D):
     return A, B, C, D
 
 
+def _period(dt, dtype):
+    raw = jnp.asarray(dt)
+    if raw.ndim != 0 or jnp.iscomplexobj(raw) or jnp.issubdtype(raw.dtype, jnp.bool_):
+        raise ValueError("dt must be a real scalar")
+    dt = jnp.asarray(dt, dtype=dtype)
+    invalid = ~jnp.isfinite(dt) | (dt <= 0)
+    if not isinstance(invalid, jax.core.Tracer) and bool(invalid):
+        raise ValueError("dt must be finite and positive")
+    return dt, invalid
+
+
 def ss(A: ArrayLike, B: ArrayLike, C: ArrayLike, D: ArrayLike) -> ContLTI:
     """Construct a continuous-time state-space system.
 
@@ -143,14 +154,14 @@ def dss(
         B: Input matrix. Shape: `(n, m)`.
         C: Output matrix. Shape: `(p, n)`.
         D: Feedthrough matrix. Shape: `(p, m)`.
-        dt: Sampling period. Shape: scalar.
+        dt: Finite positive sampling period. Shape: scalar.
 
     Returns:
         [DiscLTI][contrax.systems.DiscLTI]: A discrete-time system with
             array-valued `A`, `B`, `C`, `D`, and `dt` fields.
 
     Raises:
-        ValueError: If the matrix shapes are inconsistent or dt is not scalar.
+        ValueError: If matrix shapes or the real, positive sample time are invalid.
 
     Examples:
         >>> import jax.numpy as jnp
@@ -164,10 +175,9 @@ def dss(
         ... )
     """
     A, B, C, D = _lti_arrays(A, B, C, D)
-    dt = jnp.asarray(dt, dtype=A.real.dtype)
-    if dt.ndim != 0:
-        raise ValueError("dt must be scalar")
-    return DiscLTI(A=A, B=B, C=C, D=D, dt=dt)
+    dt, invalid = _period(dt, A.real.dtype)
+    result = DiscLTI(A=A, B=B, C=C, D=D, dt=dt)
+    return eqx.error_if(result, invalid, "dt must be finite and positive")
 
 
 # Reference: Al-Mohy & Higham (2009), "Computing the Frechet Derivative of the
@@ -202,7 +212,7 @@ def c2d(sys: ContLTI, dt: float, method: str = "zoh") -> DiscLTI:
 
     Returns:
         [DiscLTI][contrax.systems.DiscLTI]: A discrete-time realization with
-            the same output matrices and the requested sampling period.
+            the requested sample time and the selected hold/frequency mapping.
 
     Raises:
         ValueError: If `method` is not one of the supported discretizations.
@@ -220,7 +230,14 @@ def c2d(sys: ContLTI, dt: float, method: str = "zoh") -> DiscLTI:
         ... )
         >>> sys_d = cx.c2d(sys_c, dt=0.05)
     """
+    if not isinstance(sys, ContLTI):
+        raise TypeError(
+            "c2d requires continuous LTI; use sample_system for nonlinear models"
+        )
     require_x64("c2d")
+    # Keep weak scalar periods in the model precision, while promoting explicit
+    # higher-precision array periods consistently with the computed matrices.
+    dt, _ = _period(dt, jnp.result_type(sys.A.real, dt, 1.0))
     if method == "zoh":
         return _c2d_zoh(sys, dt)
     elif method == "tustin":
@@ -233,13 +250,12 @@ def _c2d_zoh(sys: ContLTI, dt: float) -> DiscLTI:
     n, m = sys.A.shape[0], sys.B.shape[1]
     # Augmented matrix: [[A, B], [0, 0]] * dt
     # expm of this gives [[Phi, Gamma], [0, I]]
-    zeros_bot = jnp.zeros((m, n + m))
+    zeros_bot = jnp.zeros((m, n + m), dtype=sys.A.dtype)
     aug = jnp.block([[sys.A, sys.B], [zeros_bot]]) * dt
-    eM = _safe_expm(aug)
+    eM = _safe_expm(aug) if n + m else aug
     Phi = eM[:n, :n]
     Gamma = eM[:n, n:]
-    dt_arr = jnp.asarray(dt, dtype=sys.A.dtype)
-    return DiscLTI(A=Phi, B=Gamma, C=sys.C, D=sys.D, dt=dt_arr)
+    return dss(Phi, Gamma, sys.C, sys.D, dt)
 
 
 def _c2d_tustin(sys: ContLTI, dt: float) -> DiscLTI:
@@ -254,7 +270,7 @@ def _c2d_tustin(sys: ContLTI, dt: float) -> DiscLTI:
     MATLAB/Octave/Scipy ``c2d(..., "tustin"/"bilinear")``.
     """
     n = sys.A.shape[0]
-    eye = jnp.eye(n)
+    eye = jnp.eye(n, dtype=sys.A.dtype)
     alpha = dt / 2.0
     LHS = eye - alpha * sys.A
     RHS = eye + alpha * sys.A
@@ -262,8 +278,7 @@ def _c2d_tustin(sys: ContLTI, dt: float) -> DiscLTI:
     Gamma = jnp.linalg.solve(LHS, sys.B * dt)
     C_d = jnp.linalg.solve(LHS.T, sys.C.T).T
     D_d = sys.D + 0.5 * sys.C @ Gamma
-    dt_arr = jnp.asarray(dt, dtype=sys.A.dtype)
-    return DiscLTI(A=Phi, B=Gamma, C=C_d, D=D_d, dt=dt_arr)
+    return dss(Phi, Gamma, C_d, D_d, dt)
 
 
 # ── linearization ──────────────────────────────────────────────────────────
