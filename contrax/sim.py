@@ -1,4 +1,4 @@
-"""contrax.sim — simulation primitives."""
+"""Simulation primitives."""
 
 import math
 from typing import Any, Callable
@@ -221,13 +221,11 @@ def simulate(
     """Simulate a system in closed loop under a control policy.
 
     Evaluates `policy(t, x)` along the system trajectory and dispatches to the
-    appropriate simulation path for discrete or continuous LTI models.
+    simulation path for the system's time domain.
 
-    For [DiscLTI][contrax.systems.DiscLTI], this keeps the existing
-    pure-`lax.scan` path and requires `num_steps`. For
-    [ContLTI][contrax.systems.ContLTI], this uses Diffrax under the hood and
-    requires `duration`. Continuous trajectories are sampled on a fixed uniform
-    save grid so output shapes stay predictable.
+    Discrete systems use `lax.scan` and require `num_steps`. Continuous systems
+    use Diffrax and require `duration`; their trajectories are sampled on a
+    fixed uniform save grid.
 
     Continuous integration accepts native Diffrax solvers, adjoints and
     step-size controllers, plus an initial step and integration limit.
@@ -235,7 +233,7 @@ def simulate(
     `diffrax.Tsit5()` with `diffrax.RecursiveCheckpointAdjoint()`.
 
     Args:
-        sys: Continuous or discrete-time system.
+        sys: Continuous or discrete LTI, nonlinear, or port-Hamiltonian system.
         x0: Initial state. Shape: `(n,)`.
         policy: Control policy mapping `(t, x)` to an input `u`.
         num_steps: Discrete-only number of time steps.
@@ -251,10 +249,9 @@ def simulate(
         throw: Raise on numerical failure, otherwise return status diagnostics.
 
     Returns:
-        SimResult: Simulation result with `.ts`, `.xs`, `.ys`. Supports tuple
-        unpacking. For [DiscLTI][contrax.systems.DiscLTI], shapes are `(T,)`,
-        `(T + 1, n)`, and `(T, p)`; for continuous systems, `(N,)`, `(N, n)`,
-        and `(N, p)` where `N` is the number of saved samples on the output grid.
+        SimResult: Simulation result. Discrete trajectories have shapes `(T,)`,
+        `(T + 1, n)`, and `(T, p)`; continuous trajectories have shapes
+        `(N,)`, `(N, n)`, and `(N, p)`, where `N` is the number of saved samples.
         Use state_times with xs and output_times with ys; the discrete terminal
         state has its own time. final_state returns the last state.
 
@@ -271,7 +268,7 @@ def simulate(
         ...     dt=0.05,
         ... )
         >>> K = cx.lqr(sys_d, jnp.eye(2), jnp.array([[1.0]])).K
-        >>> ts, xs, ys = cx.simulate(
+        >>> result = cx.simulate(
         ...     sys_d,
         ...     jnp.array([1.0, 0.0]),
         ...     lambda t, x: -K @ x,
@@ -365,13 +362,8 @@ def as_ode_term(
 ) -> Any:
     """Wrap a continuous system as a Diffrax `ODETerm`.
 
-    This is the lower-level bridge from
-    [ContLTI][contrax.systems.ContLTI] into direct Diffrax workflows when the
-    public `simulate()` surface is not the right level of control.
-
-    This function does not simulate by itself. Its behavior under `jit`,
-    `vmap`, and `grad` follows the downstream Diffrax solver and adjoint
-    configuration used by the caller.
+    Returns an ODE term for a caller-configured Diffrax solve. The downstream
+    solver and adjoint configuration determine transform behavior.
 
     Args:
         sys: Continuous-time system.

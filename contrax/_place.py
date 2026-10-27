@@ -20,9 +20,9 @@ from contrax.types import PlaceResult
 def _assignment_error(actual, desired):
     """Bottleneck bipartite matching; preserve multiplicities and conjugate pairs.
 
-    The gain/eigenvalue calculations remain native JAX. This combinatorial
-    design-time validation uses augmenting paths on the host, avoiding sorted
-    eigenvalue comparisons that can mismatch clustered conjugate pairs.
+    Gain and eigenvalue calculations use JAX. This design-time host calculation
+    matches poles by distance with augmenting paths, preserving clustered
+    conjugate pairs and their multiplicities.
     """
     distances = np.asarray(jnp.abs(actual[:, None] - desired[None, :]))
     if not np.all(np.isfinite(distances)):
@@ -103,23 +103,23 @@ def place(
     Small SISO failures may try bounded Ackermann fallback; every candidate
     must meet assignment and conditioning tolerances.
 
-    Requires float64 mode; calculations promote real model matrices to float64.
-    Call outside jit, vmap and differentiation. Structural decisions and
-    host-side matching do not have a traced or differentiable contract. Returned
-    diagnostics use the same JAX status codes as other numerical solvers.
+    Rank decisions and host-side matching make this a design-time routine. It
+    requires float64 precision, promotes real model matrices to float64, and
+    cannot be jitted, vmapped, or differentiated.
 
     Args:
-        sys: Continuous or discrete real LTI model, with n>0 and m>0.
-        poles: Finite requested poles, shape (n,), real or conjugate-paired.
+        sys: Continuous or discrete real LTI model with `n > 0` and `m > 0`.
+        poles: Finite requested poles. Shape: `(n,)`; values are real or
+            occur in conjugate pairs.
         solver: PolePlacement method, stopping/acceptance tolerances and limits.
-            Multiplicity beyond rank(B) requires bounded SISO fallback; robust
-            KNV0/YT updates do not support that configuration.
+            Multiplicity beyond `rank(B)` requires the bounded SISO fallback;
+            KNV0 and YT updates do not support that configuration.
         throw: Raise on failed assignment, convergence or conditioning checks.
 
     Returns:
-        PlaceResult: K, achieved poles, status, matching error, conditioning,
-        iterations and selected method. Unpacks as K, poles. A failed result
-        may contain a finite candidate for inspection; check successful.
+        PlaceResult: Pole-placement gain and validation diagnostics. A failed
+        result may contain a finite candidate for inspection; check
+        `successful` before using it.
 
     Examples:
         >>> import jax

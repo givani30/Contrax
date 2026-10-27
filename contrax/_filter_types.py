@@ -1,4 +1,4 @@
-"""Array result types for recursive estimators; re-exported by contrax.types."""
+"""Result bundles for recursive estimators."""
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -14,11 +14,14 @@ def _final_state(xs: Array) -> Array:
 
 
 class FilterPredictionResult(eqx.Module):
-    """One predicted mean x, covariance P, and numerical status.
+    """Mean, covariance, and status from one Kalman prediction step.
 
-    x has shape (n,), P has shape (n,n). status/successful validate finite means
-    and positive-semidefinite covariances as well as backend/input status.
-    Supports x, P = result unpacking. All fields compose with JAX transforms.
+    Attributes:
+        x: Predicted mean. Shape: `(n,)`.
+        P: Predicted covariance. Shape: `(n, n)`.
+        solver_status: Input or backend status code.
+        status: Status after checking the mean and covariance.
+        successful: Whether the prediction passed validation.
     """
 
     x: Array
@@ -38,11 +41,16 @@ class FilterPredictionResult(eqx.Module):
 
 
 class FilterUpdateResult(eqx.Module):
-    """One filtered mean x, covariance P, innovation, and numerical status.
+    """Mean, covariance, innovation, and status from one Kalman update.
 
-    x has shape (n,), P (n,n), innovation (p,). Missing innovations are zero.
-    status/successful validate finite outputs and positive-semidefinite P.
-    Supports x, P, innovation = result unpacking and JAX transforms.
+    Attributes:
+        x: Updated mean. Shape: `(n,)`.
+        P: Updated covariance. Shape: `(n, n)`.
+        innovation: Measurement residual. Shape: `(p,)`; zero when the
+            measurement is missing.
+        solver_status: Input or backend status code.
+        status: Status after checking the mean, covariance, and innovation.
+        successful: Whether the update passed validation.
     """
 
     x: Array

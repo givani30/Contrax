@@ -1,4 +1,4 @@
-"""contrax.analysis — structural and transfer analysis helpers."""
+"""Structural and transfer analysis helpers."""
 
 import jax
 import jax.numpy as jnp
@@ -31,12 +31,8 @@ __all__ = [
 def poles(sys: DiscLTI | ContLTI) -> Array:
     """Return the poles of a state-space system.
 
-    For the current state-space-only Contrax surface, poles are the eigenvalues
-    of the state matrix `A`.
-
-    This is a lightweight analysis helper that composes with `jit` and `vmap`
-    for fixed-size systems. The return dtype is generally complex, even for
-    real-valued systems with real poles.
+    The poles are the eigenvalues of the state matrix `A`. The returned dtype
+    is generally complex, including for real systems with real poles.
 
     Args:
         sys: Continuous or discrete LTI system.
@@ -53,11 +49,8 @@ def ctrb(sys: DiscLTI | ContLTI) -> Array:
     Forms `[B, AB, A^2 B, ..., A^{n-1} B]` for a continuous or discrete linear
     system.
 
-    This is a structural analysis primitive rather than a yes-or-no
-    controllability test by itself. Users typically inspect the downstream rank
-    or conditioning of the returned matrix. The implementation uses
-    `jax.lax.scan` so it composes with transforms, but it is still intended
-    primarily for design-time analysis rather than tight inner loops.
+    Use the singular values or a tolerance-aware rank of this matrix to assess
+    controllability for a particular model and scaling.
 
     Args:
         sys: Continuous or discrete LTI system.
@@ -81,11 +74,8 @@ def obsv(sys: DiscLTI | ContLTI) -> Array:
     Forms `[C; CA; CA^2; ...; CA^{n-1}]` for a continuous or discrete linear
     system.
 
-    This is a structural analysis primitive rather than a yes-or-no
-    observability test by itself. Users typically inspect the downstream rank
-    or conditioning of the returned matrix. The implementation uses
-    `jax.lax.scan` so it composes with transforms, but it is still intended
-    primarily for design-time analysis rather than tight inner loops.
+    Use the singular values or a tolerance-aware rank of this matrix to assess
+    observability for a particular model and scaling.
 
     Args:
         sys: Continuous or discrete LTI system.
@@ -109,10 +99,11 @@ def evalfr(sys: DiscLTI | ContLTI, point: complex | Array) -> Array:
     For continuous systems this computes `G(s) = C (sI - A)^-1 B + D`. For
     discrete systems it computes `G(z) = C (zI - A)^-1 B + D`.
 
-    Supports jit, vmap, JVP and VJP away from realization poles. The resolvent
-    must be nonsingular; evaluation at a realization pole may return nonfinite
-    values even when a nonminimal realization has a removable cancellation.
-    The matrices and evaluation point determine the promoted complex dtype.
+    Use point evaluation for spot checks or as the basis of a frequency-response
+    calculation. The resolvent must be nonsingular; evaluation at a realization
+    pole may return nonfinite values even when a nonminimal realization has a
+    removable cancellation. The matrices and point determine the promoted
+    complex dtype.
 
     Args:
         sys: Continuous or discrete LTI system.
@@ -143,9 +134,8 @@ def freqresp(sys: DiscLTI | ContLTI, omega: Array) -> Array:
     Discrete systems are evaluated on the unit circle at
     `z = exp(j omega dt)`.
 
-    Returns the complex transfer matrix at each frequency, with jit/vmap and
-    forward/reverse derivatives wherever the resolvents are nonsingular.
-    An empty frequency vector returns shape (0, p, m).
+    Returns the complex transfer matrix at each frequency. An empty frequency
+    vector returns shape `(0, p, m)`.
 
     Args:
         sys: Continuous or discrete LTI system.
@@ -171,9 +161,7 @@ def dcgain(sys: DiscLTI | ContLTI) -> Array:
     For continuous systems this evaluates `G(0)`. For discrete systems this
     evaluates `G(1)`.
 
-    This helper assumes the corresponding resolvent is nonsingular. It is a
-    useful quick check for low-frequency behavior, but it is not by itself a
-    stability certificate.
+    The corresponding resolvent must be nonsingular at zero frequency.
 
     Args:
         sys: Continuous or discrete LTI system.
@@ -196,8 +184,8 @@ def lyap(
     including unstable systems. Uniqueness requires every eigenvalue sum
     `lambda_i + lambda_j` to be nonzero. Symmetric Q gives symmetric X.
 
-    Requires float64 mode. Supports `jit`, `vmap`, forward and reverse
-    differentiation through the equation rather than the convergence loop.
+    Requires float64 precision. JAX derivatives follow the implicit equation
+    solve.
     Numerical failures return diagnostics unless `throw=True`.
 
     Args:
@@ -232,9 +220,9 @@ def dlyap(
     Uniqueness requires every eigenvalue product `lambda_i * lambda_j` to
     differ from one. Symmetric Q gives symmetric X.
 
-    Requires float64 mode. Supports `jit`, `vmap`, forward and reverse
-    differentiation implicitly through the equation. A failed iteration on a
-    large system never allocates a dense Kronecker operator automatically.
+    Requires float64 precision. JAX derivatives follow the implicit equation
+    solve. Automatic dense fallback is limited to eight states; larger systems
+    use the doubling method.
 
     Args:
         A: Real state transition matrix. Shape: `(n, n)`.

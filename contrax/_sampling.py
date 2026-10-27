@@ -41,9 +41,8 @@ def _fixed_step_dynamics(
 ) -> Callable:
     """Return a one-step discrete transition using a pure-JAX fixed-step integrator.
 
-    The returned closure composes cleanly with jit and vmap. No Diffrax is
-    involved; the integration graph is fully static so XLA sees a single
-    fused kernel per call.
+    The integration graph is static, allowing XLA to compile the step as one
+    fused kernel.
 
     Args:
         sys: Continuous source system. ``"sv"`` requires a SeparablePHSSystem.
@@ -169,16 +168,16 @@ def sample_system(
     `method="rk4"` uses a 4th-order Runge-Kutta scheme implemented as pure JAX
     arithmetic. The integration graph is fully static, so XLA compiles the entire
     step to a single fused kernel. 4th-order accurate: local error O(h⁵), global
-    error O(h⁴) per sampling interval `dt / n_substeps`. No error control;
-    the caller is responsible for choosing `dt` and `n_substeps` appropriate to
-    the system's time constants. **Not symplectic** — energy drift accumulates
+    error O(h⁴) per sampling interval `dt / n_substeps`. As a fixed-step method,
+    its accuracy depends on choosing `dt` and `n_substeps` for the system's time
+    constants. **Not symplectic** — energy drift accumulates
     over long simulation horizons, which matters for conservative PHS systems.
 
     `method="sv"` uses Störmer-Verlet with Strang splitting for dissipation
     and inputs (B(h/2) ∘ A(h) ∘ B(h/2), where A is the symplectic flow and B
-    is the dissipation/input flow). **Requires a
-    [SeparablePHSSystem][contrax.systems.SeparablePHSSystem]** — rejects any
-    other system type or an explicit/custom J. Dissipative/input half-steps
+    is the dissipation/input flow). Use a
+    [SeparablePHSSystem][contrax.systems.SeparablePHSSystem] with the default
+    canonical `J`. Dissipative/input half-steps
     use second-order explicit midpoint, with FOH sampled at each half-step's
     own midpoint. The full split method has global order two for smooth data.
     For purely conservative systems (R=None, G=None) this reduces to standard
@@ -186,8 +185,8 @@ def sample_system(
     substep it evaluates `∇V` twice and `∇T` once, compared to four full
     dynamics evaluations for RK4. **Symplectic** — the conservative part
     preserves phase-space volume exactly regardless of step count; the
-    dissipative/input half-steps do not guarantee energy inequalities at large
-    step sizes: resolve dissipation and forcing with n_substeps.
+    dissipative/input half-steps can violate energy inequalities at large step
+    sizes; resolve dissipation and forcing with `n_substeps`.
     Reference: Leimkuhler & Reich (2004), *Simulating
     Hamiltonian Dynamics*, Cambridge University Press.
 
@@ -196,8 +195,8 @@ def sample_system(
 
     `n_substeps` subdivides `dt` into `n_substeps` equal sub-intervals. Larger
     values improve accuracy at the cost of proportionally more dynamics
-    evaluations. Has no effect on `method="diffrax"` (adaptive methods choose
-    their own step count).
+    evaluations. Diffrax chooses its own adaptive step count, so
+    `n_substeps` applies to fixed-step methods.
 
     `solver`, `adjoint`, `dt0`, `stepsize_controller`, and a nondefault
     `max_steps` are Diffrax-only overrides; incompatible fixed-step

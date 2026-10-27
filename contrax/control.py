@@ -1,4 +1,4 @@
-"""contrax.control — LQR, pole placement, closed-loop construction."""
+"""LQR design, pole placement, and closed-loop construction."""
 
 import jax.numpy as jnp
 from jax import Array
@@ -88,9 +88,8 @@ def augment_integrator(
 ) -> DiscLTI | ContLTI:
     """Augment an LTI system with integral-of-output states.
 
-    This is the small design utility behind LQI-style workflows. It returns an
-    augmented system that can be passed to `lqr()` with a state cost that also
-    weights the added integral states.
+    Returns an augmented system for LQI design. Pass it to `lqr()` with a state
+    cost that includes the added integral states.
 
     For continuous systems, the added state evolves as
     `z_dot = sign * (C_integral x + D_integral u)`. For discrete systems, the
@@ -159,9 +158,8 @@ def lqi(
 ) -> LQRResult:
     """Design an LQI gain by augmenting integral states and calling `lqr()`.
 
-    This is intentionally a thin composition of `augment_integrator()` and
-    `lqr()`. The returned gain acts on the augmented state `[x; z]`, where `z`
-    is the integral state.
+    Augments the system with integral states and designs a gain for the
+    resulting state `[x; z]`, where `z` contains the integrated outputs.
 
     Args:
         sys: Continuous or discrete LTI system.
@@ -198,10 +196,10 @@ def state_feedback(sys: DiscLTI | ContLTI, K: Array) -> DiscLTI | ContLTI:
     A_cl = A - BK and C_cl = C - DK, with B, D and discrete dt unchanged.
     Nonzero direct feedthrough therefore contributes to the closed-loop output.
 
-    This is a pure functional constructor rather than a simulation routine. It
-    dispatches on either [DiscLTI][contrax.systems.DiscLTI] or
-    [ContLTI][contrax.systems.ContLTI] and behaves like normal array algebra
-    under JAX transforms.
+    Accepts either [DiscLTI][contrax.systems.DiscLTI] or
+    [ContLTI][contrax.systems.ContLTI]. For external input `v`, the closed-loop
+    matrices are `A_cl = A - B K` and `C_cl = C - D K`; `B`, `D`, and the
+    discrete sample time are unchanged.
 
     Args:
         sys: Continuous or discrete-time system.
@@ -252,5 +250,5 @@ def state_feedback(sys: DiscLTI | ContLTI, K: Array) -> DiscLTI | ContLTI:
 
 
 def feedback(sys: DiscLTI | ContLTI, K: Array) -> DiscLTI | ContLTI:
-    """Apply u = v - Kx to an LTI model; alias for state_feedback()."""
+    """Apply state feedback to an LTI system; alias for `state_feedback()`."""
     return state_feedback(sys, K)

@@ -1,4 +1,4 @@
-"""Map native integration outcomes to Contrax status codes."""
+"""Map native integration outcomes to shared status codes."""
 
 import jax.numpy as jnp
 

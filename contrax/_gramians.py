@@ -106,10 +106,10 @@ def ctrb_gramian(
     """Compute a continuous or discrete controllability Gramian.
 
     With no horizon, solves the infinite-horizon equation for a strictly stable
-    system. Specify t for a continuous finite integral or num_steps for a
-    discrete finite sum. Finite horizons also support marginal/unstable systems.
-    Requires float64 mode; supports `jit`, `vmap`, JVP and VJP. Discrete horizon
-    counts are static Python integers. No sample-time factor scales step sums.
+    system. Set `t` for a continuous finite integral or `num_steps` for a
+    discrete finite sum; finite horizons also apply to marginal or unstable
+    systems. Requires float64 precision. A discrete horizon is a static Python
+    integer, and each discrete sum term has unit weight.
 
     Args:
         sys: Continuous or discrete LTI realization.
@@ -145,11 +145,11 @@ def obsv_gramian(
 ) -> LyapunovResult:
     """Compute a continuous or discrete observability Gramian.
 
-    The dual of ctrb_gramian, with forcing C.T C and transposed state dynamics.
-    With no horizon, requires strict stability. Specify t for a finite continuous
-    integral or num_steps for a finite discrete sum; zero horizons are valid.
-    Requires float64 mode and supports `jit`, `vmap`, JVP and VJP. The discrete
-    term count is static; its weights are per-step, with no sample-time factor.
+    Uses the dual equation with forcing ``C.T @ C`` and transposed state
+    dynamics. With no horizon, the system must be strictly stable. Set `t` for
+    a finite continuous integral or `num_steps` for a finite discrete sum; zero
+    horizons are valid. Requires float64 precision. A discrete horizon is a
+    static Python integer, and each discrete sum term has unit weight.
 
     Args:
         sys: Continuous or discrete LTI realization.

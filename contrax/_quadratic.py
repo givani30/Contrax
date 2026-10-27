@@ -31,16 +31,14 @@ def quadratic_rollout_cost(
     num_steps: int,
     Q_terminal: Array | None = None,
 ) -> Array:
-    """Evaluate a finite-horizon LTI feedback cost without storing a trajectory.
+    """Evaluate a finite-horizon discrete LTI feedback cost.
 
-    Returns sum_{k=0}^{N-1} (x_k^T Q x_k + u_k^T R u_k) plus the optional
-    terminal cost x_N^T Q_terminal x_N, with u_k=-K x_k. Uses binary Gramian
-    composition in O(log N) matrix products and O(n^2) storage. No stability
-    assumption is needed for finite N; long unstable horizons may overflow.
-
-    Supports `jit`, `vmap`, JVP and VJP and preserves input precision. The
-    horizon is a static nonnegative Python integer. Use `vmap` for batches of
-    initial states or gains; x0 itself describes one initial state.
+    Computes ``sum(x_k.T @ Q @ x_k + u_k.T @ R @ u_k)`` for ``k=0,...,N-1``,
+    with ``u_k = -K @ x_k``, and optionally adds
+    ``x_N.T @ Q_terminal @ x_N``. Binary Gramian composition uses O(log N)
+    matrix products and O(n**2) storage. `num_steps` is a static nonnegative
+    Python integer; the system matrices, gain, costs, and initial state are JAX
+    inputs. Long horizons with unstable closed-loop dynamics can overflow.
 
     Args:
         sys: Discrete LTI system with n states and m inputs.

@@ -93,9 +93,8 @@ def lsim(
     outputs, with x0 at ts[0]. Exact block exponentials implement ZOH or FOH
     inputs on each interval; nonuniform grids are supported.
 
-    This is the public open-loop simulation name in Contrax. The implementation
-    is a pure `lax.scan`, so it composes naturally with `jit`, `vmap`, and
-    differentiation on fixed-shape inputs.
+    The input sequence has a fixed shape and each interval uses the selected
+    zero-order or first-order hold convention.
 
     Args:
         sys: Continuous or discrete LTI system.
@@ -108,8 +107,8 @@ def lsim(
     Returns:
         SimResult: Simulation result with `.ts`, `.xs`, `.ys`. Shapes:
             `(T,)`, `(T + 1, n)`, `(T, p)` for discrete systems and
-            `(N,)`, `(N, n)`, `(N, p)` for continuous systems. Supports tuple
-            unpacking; status and successful report numerical validity.
+            `(N,)`, `(N, n)`, `(N, p)` for continuous systems. `status` and
+            `successful` report numerical validity.
             state_times aligns with xs, output_times (also ts) aligns with ys.
 
     Examples:
@@ -123,7 +122,6 @@ def lsim(
         ...     dt=0.1,
         ... )
         >>> result = cx.lsim(sys, jnp.zeros((20, 1)))
-        >>> ts, xs, ys = result  # or use result.ts, result.xs, result.ys
     """
     if not isinstance(sys, (DiscLTI, ContLTI)):
         raise TypeError("lsim requires a continuous or discrete LTI system")

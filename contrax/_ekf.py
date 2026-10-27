@@ -1,4 +1,4 @@
-"""contrax._ekf — Extended Kalman filter."""
+"""Extended Kalman filtering."""
 
 import jax
 import jax.numpy as jnp
@@ -66,7 +66,6 @@ def ekf_predict(
 
     Returns:
         FilterPredictionResult: Mean x, covariance P, status and successful.
-        Unpacks as (x_pred, P_pred).
     """
     x, P, Q = prepare_state(x, P, Q)
     u = zero_input(model_or_f, x.dtype) if u is None else u
@@ -206,7 +205,6 @@ def ekf_step(
 
     Returns:
         FilterUpdateResult: Mean x, covariance P, innovation, status and successful.
-        Unpacks as (x, P, innovation).
     """
     u = zero_input(model_or_f, x.dtype) if u is None else u
     if _is_system_model(model_or_f):
@@ -256,14 +254,15 @@ def ekf(
     solver: EKF | None = None,
     throw: bool = False,
 ) -> KalmanResult:
-    """Run an extended Kalman filter for nonlinear dynamics and observations.
+    """Run an extended Kalman filter for discrete nonlinear dynamics and observations.
 
-    Uses automatic Jacobians of the transition and observation functions rather
-    than requiring a hand-derived local linearization.
+    Computes transition and observation Jacobians with automatic
+    differentiation.
 
     Joseph covariance updates and one measurement linearization are the defaults.
     Solver configuration selects compact covariance form or iterated updates.
-    Supports `jit`, `vmap` and derivatives through JAX-defined model functions.
+    Gradients flow through the filter recursion and its JAX-defined model
+    functions.
 
     Args:
         model_or_f: Nonlinear system model or dynamics function.

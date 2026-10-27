@@ -25,8 +25,8 @@ def _care_hamiltonian_solve(A: Array, B: Array, Q: Array, R: Array) -> Array:
     """Solve CARE from the stable invariant subspace of the Hamiltonian.
 
     Reference: Laub (1979), "A Schur Method for Solving Algebraic Riccati
-    Equations". We follow the same stable-subspace construction but use
-    `jnp.linalg.eig` rather than Schur so the path stays JAX-native.
+    Equations". The Hamiltonian eigensolve supplies a basis for its stable
+    invariant subspace.
     """
     Q = _symmetrize(Q)
     R = _symmetrize(R)
@@ -111,16 +111,18 @@ def care(
 ) -> LQRResult:
     """Solve the continuous algebraic Riccati equation and design a stabilizing gain.
 
-    A Hamiltonian stable-subspace candidate is refined by residual-decreasing,
-    stabilizing Newton corrections. The eigenvector solve is sensitive to poor
-    stable-subspace separation; an inaccurate candidate is reported as failure.
-    Requires float64 mode, real matrices, symmetric positive-semidefinite Q and
-    positive-definite R. Stabilizability and detectability are needed for the
-    stabilizing solution. No global precision settings are changed.
+    Solves $A^T S + S A - S B R^{-1} B^T S + Q = 0$ and computes
+    $K = R^{-1} B^T S$.
 
-    Supports `jit`, `vmap`, JVP and VJP. Derivatives solve the implicit equation,
-    without differentiating through eigenvectors or refinement iterations.
-    Residual and closed-loop stability validation run in JAX in every mode.
+    The baseline solver starts from a Hamiltonian stable-subspace candidate and
+    applies residual-decreasing Newton corrections. Poor separation of the
+    stable subspace can make the candidate inaccurate; residual and closed-loop
+    stability checks report such cases as failures. The stabilizing solution
+    requires a stabilizable pair (A, B) and detectable pair (Q**1/2, A).
+
+    Uses real matrices with symmetric positive-semidefinite Q and
+    positive-definite R, and requires float64 precision. JVPs and VJPs use
+    implicit differentiation of the Riccati equation.
 
     Args:
         A: State matrix. Shape: `(n, n)`.

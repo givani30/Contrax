@@ -1,4 +1,4 @@
-"""contrax._riccati — DARE and CARE solvers with implicit derivatives."""
+"""DARE and CARE solvers with implicit derivatives."""
 
 import functools
 
@@ -72,8 +72,8 @@ def _dare_structured_doubling_until_converged(
 ) -> tuple[Array, Array]:
     """Structured doubling with data-dependent stopping.
 
-    This is the forward convergence loop. The public solve differentiates the
-    Riccati equation through a custom JVP instead of unrolling this loop.
+    The public solve uses a custom JVP to differentiate the Riccati equation
+    implicitly.
     """
     Q = _symmetrize(Q)
     R = _symmetrize(R)
@@ -167,12 +167,18 @@ def dare(
 ) -> LQRResult:
     """Solve the discrete algebraic Riccati equation and design a stabilizing gain.
 
-    Uses structured doubling, scale-aware stopping and residual validation.
-    Requires real matrices, symmetric positive-semidefinite Q, positive-definite
-    R and float64 mode. Stabilizability and detectability are needed for the
-    stabilizing solution. Both JVP and VJP differentiate the equation implicitly
-    through a residual-validated Lyapunov solve, without unrolling iterations.
-    Supports `jit` and `vmap`; numerical failures have the same status in both.
+    Solves $S = A^T S A - A^T S B (R + B^T S B)^{-1} B^T S A + Q$
+    and computes $K = (R + B^T S B)^{-1} B^T S A$.
+
+    The solver applies structured doubling with scale-aware stopping and
+    validates the equation residual. It is the mature discrete LTI design path;
+    check the returned status and residual for numerical failures.
+    The stabilizing solution requires a stabilizable pair (A, B) and detectable
+    pair (Q**1/2, A). Inputs are real matrices with symmetric
+    positive-semidefinite Q and positive-definite R. Requires float64 precision.
+
+    Gradients use implicit differentiation of the Riccati equation through a
+    residual-validated Lyapunov solve.
 
     Args:
         A: State transition matrix. Shape: `(n, n)`.

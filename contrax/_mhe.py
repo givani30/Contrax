@@ -1,4 +1,4 @@
-"""contrax._mhe — Moving Horizon Estimation objective and solver."""
+"""Moving-horizon estimation objective and solver."""
 
 from typing import Callable
 
@@ -38,10 +38,10 @@ def soft_quadratic_penalty(residuals: Array, weight: Array) -> Array:
 
     A scalar weight multiplies the total squared residual norm; a matrix weight
     computes sum r.T @ weight @ r over the leading residual axes. Both represent
-    precision/cost weights, rather than covariances. Choose nonnegative scalar
-    or positive-semidefinite matrix weights for a nonnegative penalty.
+    The weight is a precision/cost weight. Choose a nonnegative scalar or a
+    positive-semidefinite matrix to obtain a nonnegative penalty.
 
-    Supports `jit`, `vmap`, JVP and VJP, including derivatives of weight.
+    The penalty is differentiable with respect to residuals and weights.
 
     Args:
         residuals: Real residual array, with final dimension n for matrix weights.
@@ -73,10 +73,9 @@ def mhe_warm_start(
 ) -> Array:
     """Shift an MHE trajectory guess forward by one step.
 
-    The default behavior repeats the previous terminal state. If a transition
-    and `terminal_input` are supplied, the terminal guess is propagated with
-    that model instead. This is a generic rolling-window warm-start helper,
-    not a full arrival-update policy.
+    By default, repeats the previous terminal state. Supply a transition and
+    `terminal_input` to propagate that state; update the arrival prior
+    separately when shifting the estimation window.
     """
     xs = jnp.asarray(xs)
     if xs.ndim < 2 or xs.shape[0] == 0:
@@ -104,10 +103,10 @@ def mhe_objective(
     """Evaluate a fixed-window moving-horizon-estimation objective.
 
     The candidate state trajectory is explicit in `xs`, so callers can optimize
-    it with any JAX-native solver. Accepts discrete LTI or nonlinear system
-    models, or callable transitions with an explicit observation function.
-    There are N states/measurements and N-1 transitions/inputs. Supports `jit`,
-    `vmap`, JVP and VJP for fixed shapes and differentiable model data.
+    it with a JAX optimizer. Accepts discrete LTI or nonlinear system models,
+    or callable transitions with an explicit observation function. There are N
+    states/measurements and N-1 transitions/inputs; traced inputs must retain
+    fixed shapes.
 
     The objective is a weighted nonlinear least-squares cost:
 
@@ -197,10 +196,11 @@ def mhe(
     full trajectory `xs` matches the RTS smoother output within solver
     tolerance.
 
-    The best finite accepted iterate is retained on iteration limits. Inspect
-    status and gradient_norm before using a nonconverged estimate. Implicit
-    JVP/VJP derivatives assume a converged local stationary point with a
-    nonsingular objective Hessian; they do not differentiate the search history.
+    The LBFGS implementation is a baseline fixed-window optimizer. The best
+    finite accepted iterate is retained on iteration limits; inspect
+    `solver_converged`, `status`, and `gradient_norm` when assessing a result.
+    Implicit JVP/VJP derivatives require a converged local stationary point
+    with a nonsingular objective Hessian.
     Model, noise and optional parameter data are explicit optimizer arguments.
 
     Args:

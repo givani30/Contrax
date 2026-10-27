@@ -1,4 +1,4 @@
-"""contrax.core — system types, discretization, and linearization."""
+"""System types, discretization, and linearization."""
 
 from __future__ import annotations
 
@@ -97,9 +97,8 @@ def ss(A: ArrayLike, B: ArrayLike, C: ArrayLike, D: ArrayLike) -> ContLTI:
     [ContLTI][contrax.systems.ContLTI] pytree with MATLAB-familiar
     `ss(A, B, C, D)` ergonomics.
 
-    This is a lightweight constructor rather than a solver. It is safe under
-    normal JAX transforms with fixed-shape array inputs because it only wraps
-    validated arrays into a data-only `eqx.Module`.
+    Stores validated matrices in a data-only `ContLTI` pytree. Fixed-shape
+    matrix inputs can participate in JAX transformations.
     Matrix dtypes are promoted together; explicit float32 arrays retain their
     precision even when float64 mode is enabled. Integer matrices become floating.
 
@@ -143,9 +142,8 @@ def dss(
     [DiscLTI][contrax.systems.DiscLTI] pytree with MATLAB-familiar
     `ss(A, B, C, D, dt)` ergonomics.
 
-    This is a lightweight constructor rather than a solver. The sampling period
-    is stored as a plain array leaf instead of static metadata, which keeps
-    batching over systems more natural in JAX.
+    Stores validated matrices and the sampling period in a `DiscLTI` pytree.
+    The sample period is an array leaf, so it can vary across batched systems.
     Matrix dtypes are promoted together, preserving explicit float32 data.
     The sample time uses the resulting real matrix dtype.
 
@@ -200,9 +198,8 @@ def c2d(sys: ContLTI, dt: float, method: str = "zoh") -> DiscLTI:
     [DiscLTI][contrax.systems.DiscLTI] using either zero-order hold or the
     bilinear Tustin transform.
 
-    Both paths support `jit`, `vmap`, forward/reverse differentiation and higher
-    derivatives. ZOH differentiates JAX's matrix exponential natively. Requires
-    explicit float64 mode for precision-sensitive discretization.
+    The zero-order-hold path uses the JAX matrix exponential, including for
+    derivatives. Requires float64 precision.
 
     Args:
         sys: Continuous-time system.
@@ -261,10 +258,8 @@ def _c2d_zoh(sys: ContLTI, dt: float) -> DiscLTI:
 def _c2d_tustin(sys: ContLTI, dt: float) -> DiscLTI:
     """Bilinear (Tustin) discretization: s ≈ (2/dt)(z-1)/(z+1).
 
-    This uses the state-space bilinear transform that preserves the continuous
-    transfer function under the Tustin frequency mapping. Leaving ``C`` and
-    ``D`` unchanged would produce the correct state update map but the wrong
-    discrete transfer behavior.
+    Transforms the state, input, output, and feedthrough matrices to preserve
+    the continuous transfer response under the Tustin frequency mapping.
 
     Reference: the standard bilinear state-space realization used by
     MATLAB/Octave/Scipy ``c2d(..., "tustin"/"bilinear")``.
@@ -303,8 +298,7 @@ def linearize(
     automatic differentiation and returns them as a
     [ContLTI][contrax.systems.ContLTI].
 
-    This is the main bridge from nonlinear plant code into the linear control
-    stack. A common workflow is:
+    Use the local model for discretization and controller design. For example:
 
     ```python
     sys_lin = cx.linearize(nonlinear_sys, x_eq, u_eq)
