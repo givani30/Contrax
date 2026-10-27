@@ -14,6 +14,7 @@ from contrax.nonlinear import (
     DynamicsLike,
     OutputFn,
     _is_system_model,
+    _system_dt,
 )
 
 
@@ -281,12 +282,17 @@ def linearize(
     *,
     output: OutputFn | None = None,
     t: ArrayLike = 0.0,
-) -> ContLTI:
-    """Linearize dynamics and output maps into a continuous state-space model.
+) -> ContLTI | DiscLTI:
+    """Linearize dynamics and output maps, preserving a model's time domain.
 
     Computes `A`, `B`, `C`, and `D` Jacobians at `(x0, u0)` using forward-mode
     automatic differentiation and returns them as a
-    [ContLTI][contrax.systems.ContLTI].
+    [ContLTI][contrax.systems.ContLTI] or [DiscLTI][contrax.systems.DiscLTI].
+    A discrete model supplies its sample period; plain dynamics callables are
+    interpreted as continuous vector fields. Supports jit, vmap and derivatives
+    whenever the underlying callbacks do. Sampled models inherit their integration
+    adjoint's transform support. State and input operating points must be vectors;
+    use jacfwd directly for structured inputs such as FOH endpoint pairs.
 
     Use the local model for discretization and controller design. For example:
 
@@ -298,8 +304,8 @@ def linearize(
     ```
 
     Args:
-        model_or_f: A `NonlinearSystem` or a pure JAX dynamics function with
-            signature `(t, x, u) → x_dot`.
+        model_or_f: A continuous/discrete LTI or nonlinear system, or a pure JAX
+            vector field with signature `(t, x, u) → x_dot`.
         x0: State operating point. Shape: `(n,)`.
         u0: Input operating point. Shape: `(m,)`.
         output: Output function `(x, u) → y` for plain dynamics callables.
@@ -308,8 +314,9 @@ def linearize(
         t: Operating-point time. Relevant for time-varying system models.
 
     Returns:
-        [ContLTI][contrax.systems.ContLTI]: Linearized continuous-time
-            state-space model with Jacobian matrices `A`, `B`, `C`, `D`.
+        ContLTI | DiscLTI: Local perturbation model with Jacobians A, B, C, D.
+            Discrete models retain their sample period. Constant operating-point
+            offsets are not stored; states/inputs represent deviations from x0/u0.
 
     Examples:
         >>> import jax.numpy as jnp
@@ -318,7 +325,21 @@ def linearize(
         ...     return jnp.array([x[1], -jnp.sin(x[0]) + u[0]])
         >>> sys_lin = cx.linearize(dynamics, jnp.zeros(2), jnp.zeros(1))
     """
-    t_arr = jnp.asarray(t, dtype=x0.dtype)
+    x0, u0 = jnp.asarray(x0), jnp.asarray(u0)
+    if x0.ndim != 1 or u0.ndim != 1:
+        raise ValueError("x0 and u0 must be vectors; use jacfwd for structured inputs")
+    dtype = jnp.result_type(x0, u0, 1.0)
+    x0, u0 = x0.astype(dtype), u0.astype(dtype)
+    t_arr = jnp.asarray(t, dtype=x0.real.dtype)
+    if t_arr.ndim != 0:
+        raise ValueError("t must be scalar")
+
+    if isinstance(model_or_f, (ContLTI, DiscLTI)):
+        if output is not None:
+            raise ValueError("linearize(sys, x0, u0) does not accept output=.")
+        if x0.shape != (model_or_f.A.shape[0],) or u0.shape != (model_or_f.B.shape[1],):
+            raise ValueError("Operating-point dimensions must match the LTI model")
+        return model_or_f
 
     if _is_system_model(model_or_f):
         if output is not None:
@@ -342,7 +363,8 @@ def linearize(
     B = jax.jacfwd(f, argnums=2)(t_arr, x0, u0)
     C = jax.jacfwd(h, argnums=1)(t_arr, x0, u0)
     D = jax.jacfwd(h, argnums=2)(t_arr, x0, u0)
-    return ContLTI(A=A, B=B, C=C, D=D)
+    dt = _system_dt(model_or_f) if _is_system_model(model_or_f) else None
+    return ss(A, B, C, D) if dt is None else dss(A, B, C, D, dt)
 
 
 linearize_ss = linearize

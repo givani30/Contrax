@@ -210,6 +210,14 @@ Use:
   [`PHSSystem`][contrax.systems.PHSSystem]; the system's own `dynamics` and
   `output` callables are used directly
 
+A discrete model returns a `DiscLTI` with the original sample period. This
+includes ZOH models made by `sample_system`; continuous models and bare vector
+fields return `ContLTI`. An LTI input retains its realization. The result models
+perturbations around the operating point, without storing constant offsets.
+State/input operating points must be vectors. For FOH endpoint pairs or other
+structured inputs, use `jax.jacfwd` on the model callbacks directly. Sampled
+models retain the derivative support of their integration adjoint.
+
 
 The local linear model is the usual first-order expansion around an operating
 point:

@@ -6,6 +6,7 @@ analytical Jacobians, not finite-difference approximations.
 
 import jax
 import jax.numpy as jnp
+import pytest
 
 import contrax as cx
 
@@ -118,6 +119,31 @@ class TestLinearize:
         assert jnp.allclose(sys_ss.B, _B_di, atol=1e-12)
         assert jnp.allclose(sys_ss.C, jnp.eye(2), atol=1e-12)
         assert jnp.allclose(sys_ss.D, jnp.zeros((2, 1)), atol=1e-12)
+        discrete = cx.nonlinear_system(_double_integrator, dt=0.2)
+        local = jax.jit(lambda x: cx.linearize(discrete, x, jnp.zeros(1)))(jnp.zeros(2))
+        assert isinstance(local, cx.DiscLTI)
+        assert jnp.allclose(local.A, _A_di) and local.dt == 0.2
+        assert cx.linearize(local, jnp.zeros(2), jnp.zeros(1)) is local
+
+        def sampled_local(a):
+            field = cx.nonlinear_system(lambda t, x, u: a * x + u)
+            sampled = cx.sample_system(field, 0.2, method="rk4")
+            return cx.linearize(sampled, jnp.zeros(1), jnp.zeros(1))
+
+        z = -0.2
+        expected = 1 + z + z**2 / 2 + z**3 / 6 + z**4 / 24
+        sampled = sampled_local(-1.0)
+        assert isinstance(sampled, cx.DiscLTI)
+        assert jnp.allclose(sampled.A[0, 0], expected, atol=1e-12)
+        assert jnp.allclose(sampled.B[0, 0], 1 - expected, atol=1e-12)
+        def state_jacobian(a):
+            return sampled_local(a).A[0, 0]
+
+        derivative = 0.2 * (1 + z + z**2 / 2 + z**3 / 6)
+        assert jnp.allclose(jax.jacfwd(state_jacobian)(-1.0), derivative, atol=1e-12)
+        assert jnp.allclose(jax.grad(state_jacobian)(-1.0), derivative, atol=1e-12)
+        with pytest.raises(ValueError, match="vectors"):
+            cx.linearize(discrete, jnp.zeros(2), jnp.zeros((2, 1)))
 
 
 # ── linearize_ss tests ─────────────────────────────────────────────────────
