@@ -167,12 +167,14 @@ def dare(
 ) -> LQRResult:
     """Solve the discrete algebraic Riccati equation and design a stabilizing gain.
 
-    Uses structured doubling, scale-aware stopping and residual validation.
-    Requires real matrices, symmetric positive-semidefinite Q, positive-definite
-    R and float64 mode. Stabilizability and detectability are needed for the
-    stabilizing solution. Both JVP and VJP differentiate the equation implicitly
-    through a residual-validated Lyapunov solve, without unrolling iterations.
-    Supports `jit` and `vmap`; numerical failures have the same status in both.
+    Uses structured doubling with scale-aware stopping and residual validation.
+    The stabilizing solution requires a stabilizable pair (A, B) and detectable
+    pair (Q**1/2, A). Requires real matrices, symmetric positive-semidefinite Q,
+    positive-definite R, and float64 mode.
+
+    JVPs and VJPs solve the linearized Riccati equation through a
+    residual-validated Lyapunov solve, without differentiating through the
+    doubling iterations. The solve composes with `jit` and `vmap`.
 
     Args:
         A: State transition matrix. Shape: `(n, n)`.

@@ -1,4 +1,4 @@
-"""Algorithm configuration for Contrax numerical solvers.
+"""Algorithm configuration objects for numerical solvers.
 
 Solver objects contain static algorithm choices. Close over them in ``jax.jit``
 (or pass them through Equinox transforms); model matrices remain dynamic data.
@@ -23,7 +23,7 @@ class SolverStatus(IntEnum):
 
 
 class Lyapunov(eqx.Module):
-    """Configure a continuous or discrete Lyapunov solve.
+    """Configure a continuous- or discrete-time Lyapunov solve.
 
     ``auto`` tries squared Smith iteration, then a dense solve only for systems
     with at most ``dense_limit`` states. ``doubling`` requires a stable system;
@@ -78,7 +78,7 @@ __all__ = [
 
 
 class DARE(eqx.Module):
-    """Structured doubling for the discrete algebraic Riccati equation.
+    """Configure structured doubling for the discrete algebraic Riccati equation.
 
     Attributes:
         max_steps: Maximum structured doubling iterations.
@@ -95,7 +95,7 @@ class DARE(eqx.Module):
 
 
 class CARE(eqx.Module):
-    """Hamiltonian stable-subspace CARE solve with Newton refinement.
+    """Configure a Hamiltonian stable-subspace CARE solve with Newton refinement.
 
     Refinement retains a candidate only if its residual decreases and its
     feedback remains stabilizing. It cannot repair a missing stable subspace.

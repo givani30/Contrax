@@ -35,19 +35,19 @@ def zeros(
 ) -> Array:
     """Return finite invariant zeros of a real continuous or discrete LTI system.
 
-    Zeros are rank drops of the Rosenbrock pencil relative to its normal rank.
-    Supports square and rectangular systems, arbitrary feedthrough rank and
-    nonminimal realizations. Invariant zeros coincide with transmission zeros
-    for minimal realizations; nonminimal models may include decoupling zeros
-    absent from a minimal transfer realization. Infinite zeros are omitted.
+    Computes rank drops of the Rosenbrock pencil relative to its normal rank
+    for square or rectangular systems with any feedthrough rank. For minimal
+    realizations, invariant zeros coincide with transmission zeros. Nonminimal
+    realizations can also have decoupling zeros absent from a minimal transfer
+    realization. The result contains finite zeros; infinite zeros are omitted.
 
     Orthogonal staircase reduction removes output constraints and infinite
     structure. A controllability staircase removes remaining right singular
-    structure; the finite reduced pencil is solved with JAX eigensolvers.
-    This uses rank-dependent shapes and host decisions: it is design-time
-    analysis, with no `jit`, `vmap` or differentiation contract. Requires x64.
-    Rank decisions are sensitive to scaling; set tolerances for nearly rank-
-    deficient realizations and compare transfer behavior under rescaling.
+    structure, then JAX eigensolvers solve the finite reduced pencil. Rank-
+    dependent shapes and host-side decisions make this a design-time analysis
+    routine; it does not support `jit`, `vmap`, or differentiation. Requires
+    float64 mode. Rank decisions depend on scaling, so set tolerances for nearly
+    rank-deficient realizations and compare transfer behavior after rescaling.
 
     Args:
         sys: Real continuous or discrete LTI realization.

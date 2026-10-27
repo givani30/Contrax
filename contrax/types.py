@@ -19,7 +19,7 @@ class LyapunovResult(eqx.Module):
 
     Attributes:
         X: Equation solution. Shape: `(n, n)`.
-        status: Integer `contrax.solvers.SolverStatus` code. Shape: scalar.
+        status: Integer `SolverStatus` code. Shape: scalar.
         num_steps: Doubling iterations, or the term count for a finite discrete
             Gramian. Zero for an explicit dense solve or finite continuous integral.
         residual_norm: Frobenius norm of the equation residual.
@@ -53,7 +53,6 @@ class SimResult(eqx.Module):
         num_steps: State advances or adaptive integration steps performed.
         final_state: Last state, shape `(n,)`; raises ValueError for empty xs.
 
-    Supports tuple unpacking: ``ts, xs, ys = cx.simulate(...)``
     """
 
     ts: Array
@@ -126,7 +125,6 @@ class PlaceResult(eqx.Module):
         used_fallback: Whether K came from the bounded Ackermann fallback.
         method: Selected KNV0, YT or ackermann method, as static metadata.
 
-    Supports tuple unpacking: ``K, poles = cx.place(...)``
     """
 
     K: Array
@@ -158,7 +156,7 @@ class LQRResult(eqx.Module):
             Evaluated on access; differentiation follows JAX eigenvalue limits.
         closed_loop: Closed-loop state matrix A-BK. Shape: `(n, n)`.
         residual_norm: Maximum absolute Riccati residual. Shape: scalar.
-        status: Integer `contrax.solvers.SolverStatus` code. Shape: scalar.
+        status: Integer `SolverStatus` code. Shape: scalar.
         num_steps: Doubling iterations or accepted CARE refinement corrections.
         successful: Whether the residual, cost and stability checks passed.
     """

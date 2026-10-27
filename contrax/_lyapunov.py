@@ -127,6 +127,33 @@ def solve_lyapunov(A, Q, *, continuous, solver, return_info=True):
 
 
 def lyapunov(A, Q, *, continuous, solver=None, throw=False):
+    """Solve a continuous- or discrete-time Lyapunov equation.
+
+    For continuous time, solves ``A X + X A.T + Q = 0``. For discrete time,
+    solves ``X - A X A.T = Q``. The default `Lyapunov` configuration uses
+    squared Smith doubling and permits a bounded dense fallback for small
+    systems. Dense mode handles any uniquely solvable equation but requires
+    O(n**4) storage and O(n**6) work.
+
+    The doubling method requires a Hurwitz continuous-time matrix or a
+    Schur-stable discrete-time matrix. Requires real matrices and float64 mode.
+    JAX derivatives use an implicit linear solve for the equation.
+
+    Args:
+        A: State or transition matrix. Shape: `(n, n)`.
+        Q: Equation forcing matrix. Shape: `(n, n)`.
+        continuous: Select the continuous-time equation when true and the
+            discrete-time equation when false.
+        solver: Algorithm, tolerance, and iteration configuration.
+        throw: Raise an error when validation fails.
+
+    Returns:
+        LyapunovResult: Solution, status, iteration count, and residual norm.
+
+    Raises:
+        TypeError: If `solver` is not a `Lyapunov` configuration object.
+        ValueError: If matrix shapes or dtypes are unsupported.
+    """
     require_x64("lyap" if continuous else "dlyap")
     solver = Lyapunov() if solver is None else solver
     if not isinstance(solver, Lyapunov):
