@@ -49,13 +49,25 @@ class PHSSystem(eqx.Module):
 
     def dynamics(self, t: Array | float, x: Array, u: Array) -> Array:
         """Evaluate the port-Hamiltonian vector field."""
-        del t  # canonical first pass is time-invariant
+        del t  # State-only structure maps; use schedule_phs for time dependence.
         dim = x.shape[0]
-        J = self.J(x) if self.J is not None else canonical_J(dim // 2, dtype=x.dtype)
-        R = self.R(x) if self.R is not None else jnp.zeros((dim, dim), dtype=x.dtype)
-        G = self.G(x) if self.G is not None else _zero_input_matrix(x, u)
         grad_H = jax.grad(self.H)(x)
-        return (J - R) @ grad_H + G @ u
+        if self.J is None:
+            if dim == 0 or dim % 2:
+                raise ValueError(
+                    "Canonical PHS states must have positive even dimension"
+                )
+            # Canonical J @ grad(H) is a block swap/sign change; no dense J or
+            # zero dissipation/input matrices are needed for this structure.
+            half = dim // 2
+            value = jnp.concatenate([grad_H[half:], -grad_H[:half]])
+        else:
+            value = self.J(x) @ grad_H
+        if self.R is not None:
+            value = value - self.R(x) @ grad_H
+        if self.G is not None:
+            value = value + self.G(x) @ u
+        return value
 
     def output(self, t: Array | float, x: Array, u: Array) -> Array:
         """Evaluate the observation map, defaulting to the full state."""
@@ -125,8 +137,8 @@ def separable_phs_system(
     Builds a [SeparablePHSSystem][contrax.systems.SeparablePHSSystem] whose
     Hamiltonian is `H(q, p) = V(q) + T(p)`.  This separability is structural —
     the split is stored explicitly rather than inferred from a black-box
-    `H(z)` callable.  Symplectic integrators (when added to `sample_system`)
-    will require this type; non-symplectic integrators and all other Contrax
+    `H(z)` callable. `sample_system(method="sv")` requires this type with the
+    default canonical J; non-symplectic integrators and all other Contrax
     operations treat it identically to a `PHSSystem`.
 
     Args:

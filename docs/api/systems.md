@@ -134,6 +134,11 @@ intentionally narrower:
 - `schedule_phs()` can also bind scheduled structure maps `J(t, x, context)`
   when the structure itself varies with observed context
 
+With the default `J=None`, the state has even dimension and ordering `(q, p)`.
+Dynamics apply the canonical block swap/sign change directly and omit absent
+dissipation/input matrix products. Explicit `J(x)` and scheduled structure maps
+retain their supplied values and derivatives.
+
 ## Structured Helpers
 
 Contrax now includes a small generic helper layer around structured nonlinear
@@ -158,11 +163,11 @@ framework. They are there to make the public PHS layer ergonomic and reusable.
 
 ## Port-Hamiltonian Structure Helpers
 
-`canonical_J(n)` returns the $n \times n$ canonical symplectic structure
-matrix for even $n$:
+`canonical_J(n_dofs)` returns the $2n_{dofs} \times 2n_{dofs}$ canonical
+symplectic structure matrix:
 
 $$
-J_c = \begin{bmatrix} 0 & I_{n/2} \\ -I_{n/2} & 0 \end{bmatrix}
+J_c = \begin{bmatrix} 0 & I_{n_{dofs}} \\ -I_{n_{dofs}} & 0 \end{bmatrix}
 $$
 
 Use it when building a [`PHSSystem`][contrax.systems.PHSSystem] whose

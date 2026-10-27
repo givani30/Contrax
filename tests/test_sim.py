@@ -677,29 +677,76 @@ def test_sv_bounded_drift_vs_euler_nonlinear():
     )
 
 
-def test_sv_n_substeps_improves_energy_accuracy():
-    """More substeps should reduce the energy oscillation amplitude."""
-    sys = _make_separable_oscillator_sys()
-    sys_1 = cx.sample_system(sys, 0.1, method="sv", n_substeps=1)
-    sys_4 = cx.sample_system(sys, 0.1, method="sv", n_substeps=4)
-    x0 = jnp.array([1.0, 0.0])
+def test_sv_damped_foh_second_order_energy_balance_and_gradients():
+    """Exact oracle: x'=(J-rI)x+Gu, with linearly varying input.
 
-    _, xs_1, _ = cx.simulate(sys_1, x0, lambda t, x: jnp.zeros(1), num_steps=100)
-    _, xs_4, _ = cx.simulate(sys_4, x0, lambda t, x: jnp.zeros(1), num_steps=100)
+    Van Loan FOH exponentials give the endpoint; at zero input,
+    H(t)=H(0)*exp(-2*r*t). No numerical time integrator is used as the oracle.
+    """
+    x0, eye = jnp.array([1.0, 0.2]), jnp.eye(2)
+    G = jnp.array([[0.0], [1.0]])
 
-    e_1 = jax.vmap(sys.H)(xs_1)
-    e_4 = jax.vmap(sys.H)(xs_4)
-    range_1 = float(jnp.max(e_1) - jnp.min(e_1))
-    range_4 = float(jnp.max(e_4) - jnp.min(e_4))
-    assert range_4 < range_1
+    def endpoint(theta, substeps=64):
+        r, left, right = theta
+        sys = cx.separable_phs_system(
+            lambda q: 0.5 * jnp.dot(q, q),
+            lambda p: 0.5 * jnp.dot(p, p),
+            n_dofs=1,
+            R=lambda x: r * eye,
+            G=lambda x: G,
+            input_dim=1,
+        )
+        sampled = cx.sample_system(
+            sys,
+            1.0,
+            method="sv",
+            n_substeps=substeps,
+            input_interpolation="foh",
+        )
+        return sampled.dynamics(0.0, x0, jnp.stack([left, right])[:, None])
+
+    def exact(theta):
+        r, left, right = theta
+        sys = cx.ss(cx.canonical_J(1) - r * eye, G, eye, jnp.zeros((2, 1)))
+        return cx.lsim(
+            sys,
+            jnp.stack([left, right])[:, None],
+            x0,
+            ts=jnp.array([0.0, 1.0]),
+            input_interpolation="foh",
+        ).final_state
+
+    theta = jnp.array([0.3, 0.4, 0.9])
+    errors = jnp.stack(
+        [jnp.linalg.norm(endpoint(theta, n) - exact(theta)) for n in [8, 16, 32]]
+    )
+    assert jnp.all((errors[:-1] / errors[1:] > 3.7) & (errors[:-1] / errors[1:] < 4.3))
+    expected = jax.jacfwd(exact)(theta)
+    assert jnp.allclose(jax.jit(jax.jacfwd(endpoint))(theta), expected, atol=5e-5)
+    assert jnp.allclose(jax.jit(jax.jacrev(endpoint))(theta), expected, atol=5e-5)
+    decayed = endpoint(jnp.array([0.3, 0.0, 0.0]), 128)
+    assert jnp.allclose(
+        jnp.dot(decayed, decayed), jnp.dot(x0, x0) * jnp.exp(-0.6), atol=1e-5
+    )
 
 
 def test_sv_rejects_non_separable_system():
     """method='sv' must raise ValueError for plain PHSSystem."""
-    def H(x): return 0.5 * jnp.dot(x, x)
+
+    def H(x):
+        return 0.5 * jnp.dot(x, x)
+
     sys = cx.phs_system(H, state_dim=2, input_dim=1)
     with pytest.raises(ValueError, match="SeparablePHSSystem"):
         cx.sample_system(sys, 0.1, method="sv")
+    custom = cx.separable_phs_system(
+        lambda q: jnp.sum(q**2) / 2,
+        lambda p: jnp.sum(p**2) / 2,
+        n_dofs=1,
+        J=lambda x: 2 * cx.canonical_J(1, dtype=x.dtype),
+    )
+    with pytest.raises(ValueError, match="canonical J"):
+        cx.sample_system(custom, 0.1, method="sv")
 
 
 def test_sv_rejects_nonlinear_system():

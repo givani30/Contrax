@@ -122,6 +122,16 @@ or apply `eqx.filter_jit` to its bound `step` method. `model.dynamics(t, x, u)`
 returns the state alone and produces a nonfinite state when integration fails.
 Sampled numerical status is retained by discrete `simulate` as well.
 
+For a separable Hamiltonian, `sample_system(sys, dt, method="sv")` uses
+Störmer–Verlet for the conservative flow and second-order explicit midpoint
+for the dissipative/input half-steps. It requires `SeparablePHSSystem` with
+the default `J=None`; custom structure maps are rejected. Under FOH the two
+external half-steps sample their own midpoint inputs. The full method is
+second order for smooth data and supports `jit`, `vmap`, JVP and VJP.
+Conservative Verlet preserves the symplectic structure; dissipative/input
+steps require a resolved step size and do not guarantee energy inequalities
+at arbitrary step sizes. Increase `n_substeps` to check discretization error.
+
 ## Transform Behavior
 
 The main transform contracts are:

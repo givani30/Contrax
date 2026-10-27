@@ -64,37 +64,32 @@ def _fixed_step_dynamics(
                 # Reference: Leimkuhler & Reich (2004), "Simulating Hamiltonian
                 # Dynamics", Cambridge University Press, Ch. 4.
                 # Conservative part: Störmer-Verlet on H = V(q) + T(p).
-                # Dissipative/input part: explicit half-steps via Strang splitting
-                # (B(h/2) ∘ A(h) ∘ B(h/2)), where A is the symplectic flow and B
-                # is the dissipation/input flow. B-steps are only emitted when R
-                # or G is present; for purely conservative systems (R=None, G=None)
-                # the result is exact Störmer-Verlet with no extra evaluations.
-                u_curr = _continuous_input_fn(
-                    u, tau, dt_arr.astype(x.dtype), input_interpolation
-                )
+                # Strang B(h/2) A(h) B(h/2), with second-order midpoint B-steps.
+                # In extended (x,time) space B advances time and A does not:
+                # the B midpoints sample FOH at tau+h/4 and tau+3h/4.
                 n_dofs = sys.n_dofs  # type: ignore[attr-defined]
 
-                def _dissipation_half(x_: Array, h_: Array) -> Array:
-                    grad_H = jax.grad(sys.H)(x_)  # type: ignore[attr-defined]
-                    dim = x_.shape[0]
-                    R_mat = (
-                        sys.R(x_)  # type: ignore[attr-defined]
-                        if sys.R is not None  # type: ignore[attr-defined]
-                        else jnp.zeros((dim, dim), dtype=x_.dtype)
-                    )
-                    G_mat = (
-                        sys.G(x_)  # type: ignore[attr-defined]
-                        if sys.G is not None  # type: ignore[attr-defined]
-                        else jnp.zeros((dim, u_curr.shape[0]), dtype=x_.dtype)
-                    )
-                    return x_ + h_ * (-R_mat @ grad_H + G_mat @ u_curr)
+                def external(x_, tau_):
+                    value = jnp.zeros_like(x_)
+                    if sys.R is not None:
+                        value = -sys.R(x_) @ jax.grad(sys.H)(x_)
+                    if sys.G is not None:
+                        u_ = _continuous_input_fn(
+                            u, tau_, dt_arr.astype(x.dtype), input_interpolation
+                        )
+                        value = value + sys.G(x_) @ u_
+                    return value
+
+                def external_half(x_, start):
+                    midpoint = x_ + 0.25 * h * external(x_, start)
+                    return x_ + 0.5 * h * external(midpoint, start + 0.25 * h)
 
                 has_dissipation = (
                     sys.R is not None or sys.G is not None  # type: ignore[attr-defined]
                 )
 
                 # B(h/2): half-step dissipation/input
-                x1 = _dissipation_half(x_curr, 0.5 * h) if has_dissipation else x_curr
+                x1 = external_half(x_curr, tau) if has_dissipation else x_curr
                 q, p = x1[:n_dofs], x1[n_dofs:]
 
                 # A(h): full Störmer-Verlet conservative step
@@ -107,7 +102,7 @@ def _fixed_step_dynamics(
                 x2 = jnp.concatenate([q_new, p_new])
 
                 # B(h/2): half-step dissipation/input
-                x_new = _dissipation_half(x2, 0.5 * h) if has_dissipation else x2
+                x_new = external_half(x2, tau + 0.5 * h) if has_dissipation else x2
 
             else:
 
@@ -183,13 +178,17 @@ def sample_system(
     and inputs (B(h/2) ∘ A(h) ∘ B(h/2), where A is the symplectic flow and B
     is the dissipation/input flow). **Requires a
     [SeparablePHSSystem][contrax.systems.SeparablePHSSystem]** — rejects any
-    other system type. For purely conservative systems (R=None, G=None) this
-    reduces to exact Störmer-Verlet with no extra gradient evaluations. Per
+    other system type or an explicit/custom J. Dissipative/input half-steps
+    use second-order explicit midpoint, with FOH sampled at each half-step's
+    own midpoint. The full split method has global order two for smooth data.
+    For purely conservative systems (R=None, G=None) this reduces to standard
+    Störmer-Verlet with no extra gradient evaluations. Per
     substep it evaluates `∇V` twice and `∇T` once, compared to four full
     dynamics evaluations for RK4. **Symplectic** — the conservative part
     preserves phase-space volume exactly regardless of step count; the
-    dissipative Strang half-steps are only approximately structure-preserving
-    when R or G is nonzero. Reference: Leimkuhler & Reich (2004), *Simulating
+    dissipative/input half-steps do not guarantee energy inequalities at large
+    step sizes: resolve dissipation and forcing with n_substeps.
+    Reference: Leimkuhler & Reich (2004), *Simulating
     Hamiltonian Dynamics*, Cambridge University Press.
 
     `method="euler"` and `method="midpoint"` are 1st- and 2nd-order fixed-step
@@ -267,6 +266,8 @@ def sample_system(
                 "Use separable_phs_system() to construct the system, or choose "
                 "method='rk4' for a non-symplectic fixed-step alternative."
             )
+        if sys.J is not None:
+            raise ValueError("method='sv' requires the default canonical J (J=None)")
     if not isinstance(n_substeps, int) or n_substeps < 1:
         raise ValueError(f"n_substeps must be >= 1, got {n_substeps}.")
 
