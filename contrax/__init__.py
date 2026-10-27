@@ -101,6 +101,7 @@ from contrax.types import (
     PHSStructureDiagnostics,
     PlaceResult,
     RTSResult,
+    SampleResult,
     SimResult,
     SmootherDiagnostics,
     UKFResult,
@@ -197,6 +198,7 @@ __all__ = [
     "diagonal_spd",
     # result types
     "SimResult",
+    "SampleResult",
     "PlaceResult",
     "LQRResult",
     "InnovationDiagnostics",

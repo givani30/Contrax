@@ -280,7 +280,7 @@ def ekf(
         )
     ts = jnp.arange(ys.shape[0], dtype=x0.dtype)
     if dt is not None:
-        ts = ts * dt
+        ts = ts * jnp.asarray(dt, dtype=x0.dtype)
 
     # Update-then-predict: x0/P0 is the prior on x_0.
     def update_predict(carry, inputs):

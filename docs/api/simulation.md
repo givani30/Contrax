@@ -5,7 +5,7 @@ trajectory generation in Contrax.
 
 The namespace includes:
 
-- `lsim()` for open-loop discrete LTI simulation
+- `lsim()` for open-loop discrete or sampled continuous LTI simulation
 - `simulate()` for closed-loop discrete and continuous simulation
 - `rollout()` for fixed-horizon nonlinear transitions without a system object
 - `sample_system()` for solver-backed continuous-to-discrete nonlinear model
@@ -48,8 +48,9 @@ ts, xs, ys = cx.simulate(
 - use `num_steps=...` for discrete systems
 - use `duration=...` for continuous systems
 
-All simulation functions return a [`SimResult`][contrax.types.SimResult] with
-`.ts`, `.xs`, and `.ys` fields. `SimResult` supports tuple unpacking:
+LTI response functions and `simulate` return a [`SimResult`][contrax.types.SimResult]
+with `.ts`, `.xs`, `.ys`, `.status`, `.successful` and `.num_steps` fields.
+`SimResult` supports tuple unpacking of the trajectory fields:
 ``ts, xs, ys = cx.simulate(...)``.
 
 For returned trajectories:
@@ -60,8 +61,40 @@ For returned trajectories:
 - response helpers (`step_response`, `impulse_response`, `initial_response`)
   also return `SimResult` with `.ts`, `.xs`, `.ys`
 
+Discrete simulation and responses accept zero steps: the initial state remains
+in `.xs` and the time/output arrays are empty. Continuous `simulate(duration=0)`
+returns one initial-state/output sample and performs no integration.
+
+## Continuous Open-Loop Inputs
+
+Continuous LTI `lsim` takes an explicit sample-time vector and one input per
+sample. The initial state belongs to `ts[0]`; sample times may be nonuniform.
+
+```python
+sys_c = cx.ss([[-1.0]], [[1.0]], [[1.0]], [[0.2]])
+times = jnp.array([0.0, 0.1, 0.4, 1.0])
+inputs = times[:, None]
+response = cx.lsim(sys_c, inputs, ts=times, input_interpolation="foh")
+assert response.successful
+```
+
+`zoh` holds the left input over each interval. `foh` interpolates linearly
+between adjacent inputs. Block matrix exponentials evaluate both exactly up to
+floating-point error, including for singular or marginal state matrices. The
+continuous result has N states and outputs for N time/input samples; direct
+feedthrough uses the input at each sample. The last input contributes to the
+final output and to the last FOH interval. Empty sample vectors return empty
+continuous states and outputs; one sample returns the initial state/output.
+
+Discrete `lsim` retains T inputs/outputs and T+1 states. It uses the model's
+sample period and accepts neither `ts=` nor continuous FOH interpolation.
+Both paths support `jit`, `vmap`, JVP and VJP for fixed sample counts.
+
 Use `rollout()` when there is no system object and you simply want to scan a
 transition function over a fixed input sequence.
+It accepts state and input pytrees, including scalar state leaves, and returns
+the state structure with a leading time axis on every leaf. Empty inputs retain
+one initial-state sample per leaf.
 
 Use `sample_system()` when the underlying plant model is continuous-time but
 the estimation or control workflow lives on a discrete grid. The returned
@@ -74,6 +107,13 @@ and is held constant across the interval. With
 `input_interpolation="foh"`, each step input has shape `(2, m)` and is treated
 as the endpoint pair `(u_k, u_{k+1})`; `foh_inputs()` builds that paired
 sequence from ordinary sampled inputs.
+
+For sampled models, `model.step(t, x, u)` returns
+[`SampleResult`][contrax.types.SampleResult] with terminal `.x`, `.status`,
+`.successful` and integration `.num_steps`. Close over the model in `jax.jit`,
+or apply `eqx.filter_jit` to its bound `step` method. `model.dynamics(t, x, u)`
+returns the state alone and produces a nonfinite state when integration fails.
+Sampled numerical status is retained by discrete `simulate` as well.
 
 ## Transform Behavior
 
@@ -90,9 +130,27 @@ design loops.
 
 ## Numerical Notes
 
-Continuous `simulate()` is intentionally narrow. It exposes the most important
-Diffrax escape hatches without turning every simulation call into a solver
-configuration exercise.
+`simulate` and `sample_system(method="diffrax")` accept native Diffrax solver
+and `stepsize_controller` objects, an initial step `dt0` and `max_steps`.
+For example, use `diffrax.PIDController(rtol=1e-8, atol=1e-10)` to set
+tolerances and `solver=diffrax.Kvaerno3()` for a validated implicit integration
+route. Tsit5 is the default explicit solver. Response helpers forward the same
+continuous integration controls. Incompatible discrete/fixed-step options
+raise immediately.
+
+`throw=False` returns numerical failure diagnostics. `throw=True` enables
+checked failures in eager and compiled execution, including when only a state
+or output field is consumed. Iteration limits report `max_steps_reached` even
+when some saved values are nonfinite; nonfinite output after a successful
+backend reports `numerical_failure`.
+
+The default continuous simulation adjoint is `RecursiveCheckpointAdjoint` for
+reverse-mode trajectory losses. Sampled models default to `DirectAdjoint` to
+support forward state Jacobians as required by EKF. Replacing an adjoint changes
+the supported differentiation modes; in particular, the checkpoint adjoint does
+not provide forward-mode JVP. Both explicit Tsit5 and implicit Kvaerno3 have
+sampled-Jacobian and reverse-loss coverage. Precision is determined by input
+arrays; the library does not change global precision or switch devices.
 
 `step_response()` and `impulse_response()` are analysis helpers. They are good
 for inspection and sanity-checking, but they are not the preferred path for

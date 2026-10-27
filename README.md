@@ -70,6 +70,11 @@ JAX building blocks.
 `lsim`, `simulate`, `rollout`, `step_response`, `impulse_response`,
 `initial_response`, `sample_system`, `foh_inputs`
 
+Continuous LTI `lsim` accepts an explicit sample grid with ZOH or FOH inputs.
+Simulation results report numerical status and step counts; sampled models
+retain integration diagnostics through `model.step(t, x, u)`. Native Diffrax
+solvers and step-size controllers configure continuous integration.
+
 **Control**
 `lqr`, `lqi`, `dare`, `care`, `place`, `feedback`, `state_feedback`,
 `augment_integrator`

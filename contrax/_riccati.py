@@ -216,17 +216,20 @@ def _result(A, B, Q, R, S, steps, solver, *, continuous, throw):
             ),
         ),
     )
-    if throw:
-        S = eqx.error_if(
-            S, status != 0, "Riccati solve failed; inspect status/residual"
-        )
-    return LQRResult(
+    result = LQRResult(
         K=K,
         S=S,
         poles=poles,
         residual_norm=residual_norm,
         status=status,
         num_steps=steps,
+    )
+    return (
+        eqx.error_if(
+            result, status != 0, "Riccati solve failed; inspect status/residual"
+        )
+        if throw
+        else result
     )
 
 

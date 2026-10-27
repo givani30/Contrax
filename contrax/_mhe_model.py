@@ -29,7 +29,9 @@ def model_predictions(model, observation, xs, us, params, ts, measurement_us):
         )
     if ts is None:
         dt = _system_dt(model)
-        ts = jnp.arange(N, dtype=xs.dtype) * (1 if dt is None else dt)
+        ts = jnp.arange(N, dtype=xs.dtype) * (
+            1 if dt is None else jnp.asarray(dt, dtype=xs.dtype)
+        )
     if ts.shape != (N,):
         raise ValueError("ts must have shape (N,)")
     if measurement_us is None:
@@ -52,6 +54,8 @@ def model_predictions(model, observation, xs, us, params, ts, measurement_us):
         def output(t, x, u):
             return model.C @ x + model.D @ u
     elif _is_system_model(model):
+        if _system_dt(model) is None:
+            raise ValueError("MHE requires a discrete model; use sample_system first")
         if observation is not None or params is not None:
             raise ValueError(
                 "System MHE takes model data in the system; omit observation/params"

@@ -133,9 +133,12 @@ def lyapunov(A, Q, *, continuous, solver=None, throw=False):
     if A.shape[0] == 0:
         return LyapunovResult(Q, jnp.asarray(0), jnp.asarray(0), jnp.asarray(0.0))
     X, (steps, status) = solve_lyapunov(A, Q, continuous=continuous, solver=solver)
-    if throw:
-        X = eqx.error_if(
-            X, status != 0, "Lyapunov solve failed; inspect status/residual"
-        )
     residual, _ = _residual(A, Q, X, continuous)
-    return LyapunovResult(X=X, status=status, num_steps=steps, residual_norm=residual)
+    result = LyapunovResult(X=X, status=status, num_steps=steps, residual_norm=residual)
+    return (
+        eqx.error_if(
+            result, status != 0, "Lyapunov solve failed; inspect status/residual"
+        )
+        if throw
+        else result
+    )

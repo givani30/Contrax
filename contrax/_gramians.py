@@ -85,12 +85,11 @@ def _gramian(sys, *, observable, t, num_steps, solver, throw):
         )
         result = LyapunovResult(W, status, steps, residual)
     if throw:
-        checked = eqx.error_if(
-            result.X,
+        result = eqx.error_if(
+            result,
             result.status != 0,
             "Gramian computation failed; inspect status/residual",
         )
-        result = eqx.tree_at(lambda r: r.X, result, checked)
     return result
 
 

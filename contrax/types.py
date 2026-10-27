@@ -35,6 +35,10 @@ class SimResult(eqx.Module):
         xs: State trajectory including the initial state. Shape: `(T+1, n)`
             for discrete, `(N, n)` for continuous.
         ys: Output trajectory. Shape: `(T, p)` or `(N, p)`.
+        solver_status: Backend status code; zero when no backend failure occurred.
+        status: Backend failure code, or numerical_failure for nonfinite output.
+        successful: Whether the backend and output finiteness checks succeeded.
+        num_steps: State advances or adaptive integration steps performed.
 
     Supports tuple unpacking: ``ts, xs, ys = cx.simulate(...)``
     """
@@ -42,9 +46,45 @@ class SimResult(eqx.Module):
     ts: Array
     xs: Array
     ys: Array
+    solver_status: Array = eqx.field(default_factory=lambda: jnp.asarray(0))
+    num_steps: Array = eqx.field(default_factory=lambda: jnp.asarray(0))
+
+    @property
+    def status(self) -> Array:
+        finite = (
+            jnp.all(jnp.isfinite(self.ts))
+            & jnp.all(jnp.isfinite(self.xs))
+            & jnp.all(jnp.isfinite(self.ys))
+        )
+        return jnp.where(
+            self.solver_status != 0, self.solver_status, jnp.where(finite, 0, 3)
+        )
+
+    @property
+    def successful(self) -> Array:
+        return self.status == 0
 
     def __iter__(self):
         return iter((self.ts, self.xs, self.ys))
+
+
+class SampleResult(eqx.Module):
+    """One discrete transition, including numerical integration diagnostics.
+
+    Attributes:
+        x: Terminal state. Shape: `(n,)`.
+        status: Integer `contrax.solvers.SolverStatus` code.
+        num_steps: Integration steps, or one for an ordinary discrete model.
+        successful: Whether the transition finished with finite output.
+    """
+
+    x: Array
+    status: Array
+    num_steps: Array
+
+    @property
+    def successful(self) -> Array:
+        return (self.status == 0) & jnp.all(jnp.isfinite(self.x))
 
 
 class PlaceResult(eqx.Module):
@@ -289,6 +329,7 @@ class LikelihoodDiagnostics(eqx.Module):
 __all__ = [
     "LyapunovResult",
     "SimResult",
+    "SampleResult",
     "PlaceResult",
     "LQRResult",
     "KalmanGainResult",

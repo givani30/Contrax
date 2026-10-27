@@ -9,6 +9,8 @@ import jax.numpy as jnp
 from jax import Array
 from jax.typing import ArrayLike
 
+from contrax.types import SampleResult
+
 
 class NonlinearSystem(eqx.Module):
     """General nonlinear system container.
@@ -18,15 +20,11 @@ class NonlinearSystem(eqx.Module):
     - `dynamics(t, x, u)` for the state transition or vector field
     - `output(t, x, u)` for the measured/output map
 
-    The constructor keeps the underlying field name `observation` so existing
-    pytrees stay stable, while the public constructor prefers the more
-    control-oriented `output=` spelling.
-
-    **Estimator integration:** Pass a `NonlinearSystem` directly to
-    `ekf()`, `ukf()`, `ekf_step()`, etc. Do **not** pass `sys.dynamics`
-    separately — that function takes `(t, x, u)` while the plain-function
-    estimator path expects `(x, u)`. Passing the system object lets Contrax
-    wrap the signature correctly.
+    Pass the model directly to estimators to use its dynamics, input-dependent
+    output and sample period. Plain recursive-estimator transitions also take
+    `(t, x, u)`; passing one separately requires an observation function.
+    For discrete models, `step(t, x, u)` returns numerical diagnostics alongside
+    the next state. Sampled models retain their integration diagnostics there.
     """
 
     dynamics: Callable
@@ -35,12 +33,39 @@ class NonlinearSystem(eqx.Module):
     state_dim: int | None = eqx.field(static=True, default=None)
     input_dim: int | None = eqx.field(static=True, default=None)
     output_dim: int | None = eqx.field(static=True, default=None)
+    _step_fn: Callable | None = None
 
     def output(self, t: Array | float, x: Array, u: Array) -> Array:
         """Evaluate the observation map, defaulting to the full state."""
         if self.observation is None:
             return x
         return self.observation(t, x, u)
+
+    def step(self, t: Array | float, x: Array, u: Array) -> SampleResult:
+        """Evaluate a discrete transition and retain integration diagnostics.
+
+        Close over the model in jax.jit, or use Equinox filter_jit on this bound
+        method. For sampled models, the model's integration adjoint determines
+        derivative support; ordinary discrete transitions use their JAX graph.
+
+        Args:
+            t: Transition start time. Shape: scalar.
+            x: Current state. Shape: `(n,)`.
+            u: Transition input, or an FOH endpoint pair for a sampled FOH model.
+
+        Returns:
+            SampleResult: Next state, integration status and step count.
+        """
+        if self.dt is None:
+            raise ValueError(
+                "step requires a discrete system; sample the vector field first"
+            )
+        if self._step_fn is not None:
+            return self._step_fn(t, x, u)
+        next_x = self.dynamics(t, x, u)
+        return SampleResult(
+            next_x, jnp.where(jnp.all(jnp.isfinite(next_x)), 0, 3), jnp.asarray(1)
+        )
 
 
 class SupportsNonlinearSystem(Protocol):
@@ -54,8 +79,8 @@ class SupportsNonlinearSystem(Protocol):
 
 
 DynamicsFn: TypeAlias = Callable[[Array, Array, Array], Array]  # (t, x, u) → x_next
-ObservationFn: TypeAlias = Callable[[Array], Array]             # h(x) → y
-OutputFn: TypeAlias = Callable[[Array, Array], Array]           # output(x, u) → y
+ObservationFn: TypeAlias = Callable[[Array], Array]  # h(x) → y
+OutputFn: TypeAlias = Callable[[Array, Array], Array]  # output(x, u) → y
 DynamicsLike: TypeAlias = SupportsNonlinearSystem | DynamicsFn
 ObservationLike: TypeAlias = SupportsNonlinearSystem | ObservationFn
 
@@ -128,6 +153,10 @@ def _coerce_dynamics(
 ) -> Callable[[Array | float, Array, Array], Array]:
     """Return a `(t, x, u) → x_next` callable from a system model or plain function."""
     if _is_system_model(model_or_f):
+        if _system_dt(model_or_f) is None:
+            raise ValueError(
+                "Recursive estimators require a discrete model; use sample_system first"
+            )
         return model_or_f.dynamics  # already (t, x, u)
     return model_or_f  # must be (t, x, u)
 

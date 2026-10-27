@@ -331,11 +331,7 @@ def mhe(
             ),
         ),
     )
-    if throw:
-        xs_opt = eqx.error_if(
-            xs_opt, status != 0, "MHE solve failed; inspect status and gradient_norm"
-        )
-    return MHEResult(
+    result = MHEResult(
         xs=xs_opt,
         x_hat=xs_opt[-1],
         final_cost=final_cost,
@@ -344,4 +340,11 @@ def mhe(
         num_steps=sol.stats["num_steps"],
         gradient_norm=jnp.linalg.norm(jax.grad(fn)(xs_opt, args)),
         initial_cost=initial_cost,
+    )
+    return (
+        eqx.error_if(
+            result, status != 0, "MHE solve failed; inspect status and gradient_norm"
+        )
+        if throw
+        else result
     )

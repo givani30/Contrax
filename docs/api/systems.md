@@ -6,6 +6,13 @@ become floating arrays. `dss` stores its scalar sample time in the resulting
 real matrix dtype. Inconsistent matrix shapes raise `ValueError` immediately,
 including during tracing.
 
+Discrete `NonlinearSystem` objects expose `step(t, x, u)` for a terminal state
+and numerical diagnostics. Models made by `sample_system` retain their adaptive
+integration status in that result. Recursive estimators require discrete
+transitions: sample a continuous vector field before passing its model to EKF,
+UKF or MHE. See [Simulation](simulation.md) for interpolation, tolerances,
+integration limits and adjoint selection.
+
 Systems is the public modeling namespace in Contrax. It brings together the
 objects and helpers you use to represent dynamics before you design a
 controller, run an estimator, or simulate a trajectory.

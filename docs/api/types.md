@@ -7,6 +7,8 @@ Use them as named return values rather than unpacking by position:
 
 - [`SimResult`][contrax.types.SimResult] for `simulate()`, `lsim()`,
   `step_response()`, `impulse_response()`, and `initial_response()`
+- [`SampleResult`][contrax.types.SampleResult] for a discrete nonlinear model's
+  `step()` method, including sampled integration diagnostics
 - [`LyapunovResult`][contrax.types.LyapunovResult] for `lyap()`, `dlyap()` and
   controllability/observability Gramians
 - [`PlaceResult`][contrax.types.PlaceResult] for `place()`

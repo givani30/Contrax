@@ -68,15 +68,22 @@ The main expectations are:
 
 - Contrax does not mutate `jax_enable_x64` on import; precision-sensitive
   solvers raise a clear error unless users opt into float64 explicitly
-- discrete `lsim()` and `simulate()` are JIT-compatible on fixed-shape inputs
+- discrete and continuous LTI `lsim()` support fixed-shape `jit`, `vmap`, JVP
+  and VJP; continuous calls require an explicit sample grid and hold convention
 - `simulate()` uses `num_steps` for discrete systems and `duration` for
   continuous systems so horizon semantics stay explicit
 - continuous `simulate()` returns values on a fixed save grid rather than
   exposing adaptive internal solver steps directly
+- simulation results expose backend status and integration step counts;
+  `throw=True` checks failures even when compiled code consumes just one field
+- continuous simulation defaults to a checkpoint adjoint for reverse losses;
+  sampled models default to a direct adjoint for forward state Jacobians
 - `step_response()` and `impulse_response()` are analysis helpers; they are
   not the preferred path for gradients with respect to nonsmooth event timing
 - `lqr()` on the discrete path supports finite gradients through representative
   objectives
+- Riccati and Lyapunov solvers support implicit JVP and VJP without unrolling
+  their convergence loops
 - vmapped workflows such as `linearize -> c2d -> lqr` are part of the
   intended use case
 - `place()` is a design-time helper: its numerical core is JAX-native, but
