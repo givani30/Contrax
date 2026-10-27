@@ -4,8 +4,8 @@ import jax
 import jax.numpy as jnp
 from jax import Array
 
+from contrax._gramians import ctrb_gramian, obsv_gramian  # noqa: F401
 from contrax._lyapunov import lyapunov
-from contrax._precision import require_x64
 from contrax._quadratic import quadratic_rollout_cost  # noqa: F401
 from contrax._zeros import zeros  # noqa: F401
 from contrax.core import ContLTI, DiscLTI
@@ -26,25 +26,6 @@ __all__ = [
     "dlyap",
     "quadratic_rollout_cost",
 ]
-
-
-def _finite_horizon_gramian(A_left: Array, forcing: Array, horizon: float) -> Array:
-    """Finite-horizon Gramian via Van Loan block-matrix exponential.
-
-    Reference: Van Loan (1978), "Computing Integrals Involving the Matrix
-    Exponential", IEEE TAC.
-    """
-    n = A_left.shape[0]
-    block = jnp.block(
-        [
-            [A_left, forcing],
-            [jnp.zeros_like(A_left), -A_left.T],
-        ]
-    )
-    exp_block = jax.scipy.linalg.expm(block * horizon)
-    phi11 = exp_block[:n, :n]
-    phi12 = exp_block[:n, n:]
-    return phi12 @ phi11.T
 
 
 def poles(sys: DiscLTI | ContLTI) -> Array:
@@ -194,42 +175,6 @@ def dcgain(sys: DiscLTI | ContLTI) -> Array:
     """
     point = jnp.array(0.0) if isinstance(sys, ContLTI) else jnp.array(1.0)
     return evalfr(sys, point)
-
-
-def ctrb_gramian(sys: ContLTI, t: float = 10.0) -> Array:
-    """Compute the finite-horizon controllability Gramian.
-
-    Uses the Van Loan block-matrix exponential construction to evaluate the
-    finite-horizon controllability Gramian in closed form for continuous-time
-    linear systems.
-
-    Args:
-        sys: Continuous-time linear system.
-        t: Integration horizon. Shape: scalar.
-
-    Returns:
-        Array: Finite-horizon controllability Gramian. Shape: `(n, n)`.
-    """
-    require_x64("ctrb_gramian")
-    A, B = sys.A, sys.B
-    return _finite_horizon_gramian(A, B @ B.T, t)
-
-
-def obsv_gramian(sys: ContLTI, t: float = 10.0) -> Array:
-    """Compute the finite-horizon observability Gramian.
-
-    Uses the same Van Loan block-matrix exponential construction as
-    `ctrb_gramian()`, applied to the dual system.
-
-    Args:
-        sys: Continuous-time linear system.
-        t: Integration horizon. Shape: scalar.
-
-    Returns:
-        Array: Finite-horizon observability Gramian. Shape: `(n, n)`.
-    """
-    require_x64("obsv_gramian")
-    return _finite_horizon_gramian(sys.A.T, sys.C.T @ sys.C, t)
 
 
 def lyap(

@@ -6,6 +6,21 @@ from jax import Array
 from contrax.core import DiscLTI
 
 
+def _compose_gramian(A, W, num_steps):
+    """Return A**N and sum (A**k).T W A**k by binary composition."""
+    phi, gramian = jnp.eye(A.shape[0], dtype=A.dtype), jnp.zeros_like(W)
+    # Reference: finite Gramian semigroup identity
+    # H_(a+b) = H_a + (A**a).T H_b A**a.
+    # The loop is over static horizon bits, never over array runtime values.
+    for bit in bin(num_steps)[2:] if num_steps else ():
+        gramian = gramian + phi.T @ gramian @ phi
+        phi = phi @ phi
+        if bit == "1":
+            gramian = gramian + phi.T @ W @ phi
+            phi = A @ phi
+    return phi, (gramian + gramian.T) / 2
+
+
 def quadratic_rollout_cost(
     sys: DiscLTI,
     K: Array,
@@ -66,16 +81,6 @@ def quadratic_rollout_cost(
         raise ValueError("Q_terminal must have shape (n, n)")
     A = sys.A - sys.B @ K
     W = Q + K.T @ R @ K
-    phi, gramian = jnp.eye(n, dtype=A.dtype), jnp.zeros_like(W)
-    # Binary composition of (Phi, H): two consecutive blocks combine as
-    # (Phi2 @ Phi1, H1 + Phi1.T @ H2 @ Phi1). This is the discrete finite
-    # Gramian analogue of the semigroup identity for quadratic functionals.
-    # The loop is over static horizon bits, never over array runtime values.
-    for bit in bin(num_steps)[2:] if num_steps else ():
-        gramian = gramian + phi.T @ gramian @ phi
-        phi = phi @ phi
-        if bit == "1":
-            gramian = gramian + phi.T @ W @ phi
-            phi = A @ phi
+    phi, gramian = _compose_gramian(A, W, num_steps)
     gramian = gramian + phi.T @ terminal @ phi
     return x0 @ ((gramian + gramian.T) / 2) @ x0

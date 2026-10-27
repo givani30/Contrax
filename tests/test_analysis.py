@@ -179,7 +179,7 @@ def test_scalar_controllability_gramian_matches_analytic_value():
         D=jnp.zeros((1, 1)),
     )
     t = 5.0
-    W = ctrb_gramian(sys, t=t)
+    W = ctrb_gramian(sys, t=t).X
     expected = 2.0 * (1.0 - jnp.exp(-2.0 * t))
 
     assert jnp.allclose(W[0, 0], expected, atol=1e-3, rtol=1e-3)
@@ -194,7 +194,7 @@ def test_scalar_observability_gramian_matches_analytic_value():
         D=jnp.zeros((1, 1)),
     )
     t = 5.0
-    W = obsv_gramian(sys, t=t)
+    W = obsv_gramian(sys, t=t).X
     expected = 4.5 * (1.0 - jnp.exp(-2.0 * t))
 
     assert jnp.allclose(W[0, 0], expected, atol=2e-3, rtol=1e-3)
@@ -208,7 +208,7 @@ def test_controllability_gramian_satisfies_finite_horizon_lyapunov_identity():
         D=jnp.zeros((2, 1)),
     )
     t = 1.7
-    W = ctrb_gramian(sys, t=t)
+    W = ctrb_gramian(sys, t=t).X
     phi = jax.scipy.linalg.expm(sys.A * t)
     residual = (
         sys.A @ W + W @ sys.A.T + sys.B @ sys.B.T - phi @ (sys.B @ sys.B.T) @ phi.T
@@ -225,7 +225,7 @@ def test_analysis_gradients_are_finite():
             C=jnp.array([[1.0]]),
             D=jnp.zeros((1, 1)),
         )
-        return ctrb_gramian(sys, t=2.0)[0, 0]
+        return ctrb_gramian(sys, t=2.0).X[0, 0]
 
     grad = jax.grad(loss)(jnp.array(0.0))
 

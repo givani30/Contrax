@@ -6,12 +6,13 @@ from jax import Array
 
 
 class LyapunovResult(eqx.Module):
-    """Solution and diagnostics for a continuous or discrete Lyapunov equation.
+    """Solution and diagnostics for a Lyapunov equation or LTI Gramian.
 
     Attributes:
         X: Equation solution. Shape: `(n, n)`.
         status: Integer `contrax.solvers.SolverStatus` code. Shape: scalar.
-        num_steps: Number of doubling steps (zero for an explicit dense solve).
+        num_steps: Doubling iterations, or the term count for a finite discrete
+            Gramian. Zero for an explicit dense solve or finite continuous integral.
         residual_norm: Frobenius norm of the equation residual.
         successful: Whether the validated equation residual meets tolerance.
     """

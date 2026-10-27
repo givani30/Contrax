@@ -8,7 +8,7 @@ The namespace includes:
 - `ctrb()` and `obsv()` for controllability and observability matrices
 - `poles()` for eigenvalue inspection
 - `evalfr()`, `freqresp()`, and `dcgain()` for transfer evaluation
-- `ctrb_gramian()` and `obsv_gramian()` for finite-horizon continuous Gramians
+- `ctrb_gramian()` and `obsv_gramian()` for continuous/discrete, finite/infinite Gramians
 - `lyap()` and `dlyap()` for continuous and discrete Lyapunov equation solvers
 - `zeros()` for finite invariant zeros of square or rectangular LTI systems
 - `quadratic_rollout_cost()` for exact finite-horizon discrete feedback costs
@@ -32,7 +32,7 @@ sys = cx.ss(
 
 poles = cx.poles(sys)
 dc = cx.dcgain(sys)
-Wc = cx.ctrb_gramian(sys, t=2.0)
+Wc = cx.ctrb_gramian(sys, t=2.0).X
 ```
 
 ## Conventions
@@ -51,8 +51,36 @@ Most analysis helpers are direct array computations on fixed system data, so
 they fit naturally into `jit` and batched workflows when the underlying linear
 algebra path does.
 
-The Gramian helpers are continuous-time, matrix-exponential-based utilities
-rather than hot-path primitives.
+Gramian helpers support `jit`, `vmap`, JVP and VJP. Discrete finite horizon
+counts are static Python integers. Continuous finite horizons use a matrix
+exponential; infinite horizons differentiate the Lyapunov equation implicitly.
+
+## Gramians and Horizons
+
+With no horizon argument, `ctrb_gramian(sys)` and `obsv_gramian(sys)` solve the
+stable infinite-horizon equation. The default uses Lyapunov doubling. Both
+continuous and discrete systems must be strictly stable for an infinite-horizon
+Gramian; a marginal or unstable model returns `invalid_problem` even if a
+general dense Lyapunov equation could have a finite solution.
+
+Specify `t=...` for a continuous integration horizon, or `num_steps=...` for a
+discrete sum over k=0,...,N−1. The arguments are distinct to avoid confusing
+seconds and step counts. Finite horizons support marginal and unstable models;
+zero returns the zero Gramian. Discrete sums have per-step weighting and do not
+include a sample-time factor. Controllability sums use A^k B B.T (A^k).T;
+observability sums use (A^k).T C.T C A^k.
+
+Both functions return `LyapunovResult`: the Gramian is `.X`, with `.status`,
+`.successful` and `.residual_norm` diagnostics. `throw=True` checks failure in
+eager or compiled execution. The finite-horizon residual checks the corresponding
+Gramian equation with its terminal forcing term. For finite discrete horizons,
+`.num_steps` is the requested term count; infinite solves report doubling steps.
+
+Select an infinite-horizon equation algorithm using
+`solver=cx.solvers.Lyapunov(...)`. Finite discrete horizons use binary
+composition; finite continuous horizons use Van Loan's block exponential.
+Very long continuous horizons can overflow the block exponential even for a
+stable model; use the infinite-horizon solve when that is the intended quantity.
 
 ## Lyapunov Equations
 
