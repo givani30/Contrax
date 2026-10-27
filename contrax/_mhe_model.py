@@ -8,6 +8,10 @@ from contrax.nonlinear import _is_system_model, _system_dt
 
 
 def validate_window(xs, us, ys, x_prior, P_prior, Q_noise, R_noise):
+    if any(
+        jnp.iscomplexobj(a) for a in (xs, us, ys, x_prior, P_prior, Q_noise, R_noise)
+    ):
+        raise ValueError("MHE requires real state, input, observation and noise arrays")
     if xs.ndim != 2 or xs.shape[0] < 1 or xs.shape[1] < 1:
         raise ValueError("xs must have shape (N, n), with N >= 1 and n >= 1")
     N, n = xs.shape

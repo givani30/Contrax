@@ -8,6 +8,7 @@ import jax.numpy as jnp
 import optimistix as optx
 from jax import Array
 
+from contrax._filter_checks import covariance_valid
 from contrax._mhe_model import model_predictions, validate_window
 from contrax.core import DiscLTI
 from contrax.nonlinear import SupportsNonlinearSystem
@@ -37,8 +38,8 @@ def soft_quadratic_penalty(residuals: Array, weight: Array) -> Array:
     """Return a quadratic soft penalty with matrix or scalar weighting.
 
     A scalar weight multiplies the total squared residual norm; a matrix weight
-    computes sum r.T @ weight @ r over the leading residual axes. Both represent
-    The weight is a precision/cost weight. Choose a nonnegative scalar or a
+    computes sum r.T @ weight @ r over the leading residual axes. The weight
+    is a precision/cost weight. Choose a nonnegative scalar or a
     positive-semidefinite matrix to obtain a nonnegative penalty.
 
     The penalty is differentiable with respect to residuals and weights.
@@ -123,9 +124,9 @@ def mhe_objective(
             for a sampled FOH model.
         ys: Measurement sequence aligned with xs. Shape: `(N, p)`.
         x_prior: Prior state for the start of the window. Shape: `(n,)`.
-        P_prior: Arrival covariance. Shape: `(n, n)`.
-        Q_noise: Process noise covariance. Shape: `(n, n)`.
-        R_noise: Measurement noise covariance. Shape: `(p, p)`.
+        P_prior: Positive-definite arrival covariance. Shape: `(n, n)`.
+        Q_noise: Positive-definite process covariance. Shape: `(n, n)`.
+        R_noise: Positive-definite measurement covariance. Shape: `(p, p)`.
         observation: Required for callable transitions; `h(x)` or `h(x, params)`.
         params: Optional parameters passed to `f`, `h`, and `extra_cost`.
         extra_cost: Optional callable adding additional smooth costs.
@@ -214,9 +215,9 @@ def mhe(
             for a sampled FOH model.
         ys: Measurement sequence aligned with xs. Shape: `(N, p)`.
         x_prior: Prior mean for the start of the window.  Shape: `(n,)`.
-        P_prior: Arrival covariance.  Shape: `(n, n)`.
-        Q_noise: Process noise covariance.  Shape: `(n, n)`.
-        R_noise: Measurement noise covariance.  Shape: `(p, p)`.
+        P_prior: Positive-definite arrival covariance. Shape: `(n, n)`.
+        Q_noise: Positive-definite process covariance. Shape: `(n, n)`.
+        R_noise: Positive-definite measurement covariance. Shape: `(p, p)`.
         observation: Required for callable transitions; `h(x)` or `h(x, params)`.
         params: Optional parameters passed to `f`, `h`, and `extra_cost`.
         extra_cost: Optional callable adding additional smooth costs.
@@ -261,6 +262,11 @@ def mhe(
     if not isinstance(max_steps, int) or max_steps < 0:
         raise ValueError("max_steps must be a nonnegative integer")
     validate_window(xs_init, us, ys, x_prior, P_prior, Q_noise, R_noise)
+    valid_covariances = (
+        covariance_valid(P_prior, strict=True)
+        & covariance_valid(Q_noise, strict=True)
+        & covariance_valid(R_noise, strict=True)
+    )
 
     def fn(xs, args):
         (
@@ -338,7 +344,7 @@ def mhe(
     xs_opt = sol.value
     final_cost = fn(xs_opt, args)
     finite = jnp.all(jnp.isfinite(xs_opt)) & jnp.isfinite(final_cost)
-    converged = sol.result == optx.RESULTS.successful
+    converged = (sol.result == optx.RESULTS.successful) & valid_covariances
     status = jnp.where(
         ~finite,
         int(SolverStatus.numerical_failure),
@@ -352,6 +358,7 @@ def mhe(
             ),
         ),
     )
+    status = jnp.where(valid_covariances, status, int(SolverStatus.invalid_problem))
     result = MHEResult(
         xs=xs_opt,
         final_cost=final_cost,

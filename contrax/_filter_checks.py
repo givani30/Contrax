@@ -5,7 +5,8 @@ import jax
 import jax.numpy as jnp
 
 
-def covariance_valid(matrix):
+def covariance_valid(matrix, *, strict=False):
+    matrix = jnp.asarray(matrix, dtype=jnp.result_type(matrix, 1.0))
     matrix = jax.lax.stop_gradient(matrix)
     finite = jnp.all(jnp.isfinite(matrix), axis=(-2, -1))
     safe = jnp.where(jnp.isfinite(matrix), matrix, 0)
@@ -16,11 +17,8 @@ def covariance_valid(matrix):
         <= tolerance
     )
     eigenvalues = jnp.linalg.eigvalsh((safe + jnp.swapaxes(safe, -1, -2)) / 2)
-    return (
-        finite
-        & symmetric
-        & (jnp.min(eigenvalues, axis=-1, initial=jnp.inf) >= -tolerance)
-    )
+    smallest = jnp.min(eigenvalues, axis=-1, initial=jnp.inf)
+    return finite & symmetric & (smallest > 0 if strict else smallest >= -tolerance)
 
 
 def input_status(*covariances):

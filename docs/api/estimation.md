@@ -280,6 +280,11 @@ endpoint. The default terminal pair holds the last right endpoint at both ends.
 `ts` supplies explicit sample times for time-dependent models. Callable
 transitions accept `f(x, u)` and require `observation=h` separately.
 
+Arrival, process and observation covariances must be finite, symmetric and
+positive definite: invalid covariances report `invalid_problem` even if the
+optimizer converges. The objective uses covariance solves; singular-noise
+constraints are not represented by this formulation.
+
 Native Optimistix minimizers are accepted through `solver=`. The wrapper retains
 the best finite accepted iterate when the iteration limit is reached and
 returns `.status`, `.successful`, `.num_steps`, `.gradient_norm`, `.initial_cost`

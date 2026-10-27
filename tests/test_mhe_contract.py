@@ -113,6 +113,11 @@ def test_one_state_window_and_nonconvergence_diagnostics():
     assert limited.gradient_norm > 0
     with pytest.raises(Exception, match="MHE solve failed"):
         cx.mhe(*args, max_steps=0, throw=True)
+    # A negative variance can yield a convex objective and a converged optimizer;
+    # it must still be an invalid estimation problem rather than a successful fit.
+    invalid = jax.jit(lambda r: cx.mhe(*args[:-1], r))(-2 * jnp.eye(1))
+    assert invalid.status == cx.solvers.SolverStatus.invalid_problem
+    assert not invalid.successful and not invalid.solver_converged
 
 
 @pytest.mark.parametrize("dtype", [jnp.float32, jnp.float64])
