@@ -28,12 +28,17 @@ def test_lsim_shapes(disc_sys):
     T, n, m, p = 50, 3, 1, 1
     x0 = jnp.zeros(n)
     us = jnp.zeros((T, m))
-    ts, xs, ys = cx.lsim(disc_sys, us, x0)
+    result = cx.lsim(disc_sys, us, x0)
+    ts, xs, ys = result
     assert ts.shape == (T,)
     assert xs.shape == (T + 1, n)
     assert ys.shape == (T, p)
     expected = jnp.arange(T, dtype=float) * DT
     assert jnp.allclose(ts, expected, atol=1e-10)
+    assert result.state_times.shape[0] == xs.shape[0]
+    assert jnp.allclose(result.state_times, jnp.arange(T + 1) * DT)
+    assert jnp.array_equal(result.output_times, ts)
+    assert jnp.array_equal(result.final_state, xs[-1])
 
 
 def test_lsim_one_step_manual(disc_sys):
@@ -563,16 +568,11 @@ def test_sample_system_rk4_ukf_shapes():
     us = jnp.zeros((T, 1))
 
     result = cx.ukf(
-        sys_d,
-        Q_noise=1e-4 * jnp.eye(2),
-        R_noise=1e-3 * jnp.eye(2),
-        ys=ys,
-        us=us,
-        x0=x0,
-        P0=0.1 * jnp.eye(2),
+        sys_d, ys, us=us, x0=x0, P0=0.1 * jnp.eye(2),
+        Q=1e-4 * jnp.eye(2), R=1e-3 * jnp.eye(2),
     )
-    assert result.x_hat.shape == (T, 2)
-    assert jnp.all(jnp.isfinite(result.x_hat))
+    assert result.xs.shape == (T, 2)
+    assert jnp.all(jnp.isfinite(result.xs))
 
 
 # ---------------------------------------------------------------------------

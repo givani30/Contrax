@@ -51,6 +51,7 @@ def test_continuous_simulation_status_and_parameter_gradient(solver):
 
     result = jax.jit(solve)(jnp.array(2.0))
     assert result.successful and result.num_steps > 0
+    np.testing.assert_allclose(result.state_times, result.output_times)
     np.testing.assert_allclose(result.xs[-1, 0], jnp.exp(-0.4), atol=1e-7)
     gradient = jax.jit(jax.grad(lambda a: solve(a).xs[-1, 0]))(jnp.array(2.0))
     np.testing.assert_allclose(gradient, -0.2 * jnp.exp(-0.4), atol=1e-7)
@@ -103,6 +104,7 @@ def test_zero_horizons_and_response_wrappers_keep_integration_controls():
     d = cx.dss([[0.8]], [[1.0]], [[1.0]], [[0.0]], 1)
     result = cx.impulse_response(d, num_steps=0)
     assert result.successful and result.xs.shape == (1, 1) and result.ys.shape == (0, 1)
+    np.testing.assert_allclose(result.state_times, [0.0])
     with pytest.raises(ValueError, match="continuous-only"):
         cx.simulate(
             d,
@@ -130,24 +132,24 @@ def test_float32_sampled_estimation_preserves_precision_with_x64_enabled():
     result = jax.jit(
         lambda: cx.ekf(
             sampled,
-            0.01 * eye,
-            0.1 * eye,
             jnp.zeros((3, 1), dtype=jnp.float32),
-            jnp.ones((3, 1), dtype=jnp.float32),
-            jnp.zeros(1, dtype=jnp.float32),
-            eye,
+            Q=0.01 * eye,
+            R=0.1 * eye,
+            us=jnp.ones((3, 1), dtype=jnp.float32),
+            x0=jnp.zeros(1, dtype=jnp.float32),
+            P0=eye,
         )
     )()
-    assert result.x_hat.dtype == result.P.dtype == jnp.float32
+    assert result.xs.dtype == result.Ps.dtype == jnp.float32
 
 
 def test_continuous_vector_fields_require_sampling_before_estimation():
     model = cx.nonlinear_system(lambda t, x, u: -x + u)
     x, P, u = jnp.ones(1), jnp.eye(1), jnp.zeros(1)
     with pytest.raises(ValueError, match="discrete model"):
-        cx.ekf_predict(model, x, P, u, P)
+        cx.ekf_predict(model, x, P, u=u, Q=P)
     with pytest.raises(ValueError, match="discrete model"):
-        cx.ukf(model, P, P, jnp.ones((2, 1)), jnp.zeros((2, 1)), x, P)
+        cx.ukf(model, jnp.ones((2, 1)), Q=P, R=P, us=jnp.zeros((2, 1)), x0=x, P0=P)
     with pytest.raises(ValueError, match="discrete model"):
         cx.mhe_objective(
             model, jnp.ones((2, 1)), jnp.zeros((1, 1)), jnp.ones((2, 1)), x, P, P, P

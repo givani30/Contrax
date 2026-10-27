@@ -100,8 +100,8 @@ def run_ekf(xs_true, ys, us_foh):
 
     xs_est = [x]
     for k in range(T_STEPS):
-        x, P = cx.ekf_predict(f_foh, x, P, us_foh[k], Q_noise)
-        x, P, _ = cx.ekf_update(h, x, P, ys[k + 1], R_noise)
+        x, P = cx.ekf_predict(f_foh, x, P, u=us_foh[k], Q=Q_noise)
+        x, P, _ = cx.ekf_update(h, x, P, ys[k + 1], R=R_noise)
         xs_est.append(x)
 
     return jnp.stack(xs_est)  # (T+1, 2)

@@ -41,7 +41,7 @@ def test_model_and_noise_implicit_gradients_match_normal_equations():
             R,
             solver=optx.LBFGS(rtol=1e-10, atol=1e-10),
         )
-        return result.x_hat[0]
+        return result.final_state[0]
 
     def reference(theta):
         a, q, r = jnp.exp(theta)
@@ -81,7 +81,7 @@ def test_callable_parameters_are_optimizer_arguments():
             0.2 * jnp.eye(1),
             observation=output,
             params=a,
-        ).x_hat[0]
+        ).final_state[0]
 
     actual = jax.jit(jax.grad(loss))(jnp.array(0.8))
     eps = 1e-4
@@ -103,7 +103,7 @@ def test_one_state_window_and_nonconvergence_diagnostics():
     )
     converged = cx.mhe(*args)
     assert converged.successful
-    np.testing.assert_allclose(converged.x_hat, [1 / 1.2], atol=1e-5)
+    np.testing.assert_allclose(converged.final_state, [1 / 1.2], atol=1e-5)
     limited = jax.jit(lambda: cx.mhe(*args, max_steps=0))()
     assert limited.status == cx.solvers.SolverStatus.max_steps_reached
     assert not limited.successful
@@ -135,7 +135,7 @@ def test_mhe_preserves_precision_and_batches(dtype):
     result = jax.jit(jax.vmap(solve))(jnp.array([1.0, 2.0], dtype=dtype))
     assert result.xs.dtype == dtype
     assert jnp.all(result.successful)
-    np.testing.assert_allclose(result.x_hat[:, 0], [1 / 1.2, 2 / 1.2], atol=1e-5)
+    np.testing.assert_allclose(result.final_state[:, 0], [1 / 1.2, 2 / 1.2], atol=1e-5)
 
 
 def test_default_optimizer_float32_context_and_limited_accepted_iterate():

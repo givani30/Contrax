@@ -27,6 +27,7 @@ def continuous_lsim(sys, us, x0, ts, interpolation, throw):
             ts,
             jnp.empty((0, n), dtype=dtype),
             jnp.empty((0, sys.C.shape[0]), dtype=dtype),
+            state_times=ts,
         )
 
     def step(x, inputs):
@@ -65,6 +66,7 @@ def continuous_lsim(sys, us, x0, ts, interpolation, throw):
         ts,
         states,
         outputs,
+        state_times=ts,
         solver_status=jnp.where(valid, 0, 2),
         num_steps=jnp.asarray(ts.shape[0] - 1),
     )
@@ -108,6 +110,7 @@ def lsim(
             `(T,)`, `(T + 1, n)`, `(T, p)` for discrete systems and
             `(N,)`, `(N, n)`, `(N, p)` for continuous systems. Supports tuple
             unpacking; status and successful report numerical validity.
+            state_times aligns with xs, output_times (also ts) aligns with ys.
 
     Examples:
         >>> import jax.numpy as jnp
@@ -150,7 +153,13 @@ def lsim(
 
     _, (xs, ys) = jax.lax.scan(step, x0, us)
     xs_full = jnp.concatenate([x0[None], xs], axis=0)
-    result = SimResult(ts, xs_full, ys, num_steps=jnp.asarray(T))
+    result = SimResult(
+        ts,
+        xs_full,
+        ys,
+        state_times=jnp.arange(T + 1, dtype=ts.dtype) * sys.dt,
+        num_steps=jnp.asarray(T),
+    )
     if throw:
         result = eqx.error_if(result, ~result.successful, "Discrete lsim failed")
     return result

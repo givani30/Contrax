@@ -3,7 +3,9 @@
 import jax
 import jax.numpy as jnp
 from jax import Array
+from jax.scipy.linalg import solve_triangular
 
+from contrax._filter_common import prepare_filter
 from contrax._kalman import _symmetrize
 from contrax.nonlinear import (
     DynamicsLike,
@@ -13,6 +15,7 @@ from contrax.nonlinear import (
     _is_system_model,
     _system_dt,
 )
+from contrax.solvers import UKF
 from contrax.types import RTSResult, UKFResult
 
 
@@ -42,9 +45,8 @@ def _sigma_points(
 ) -> tuple[Array, Array, Array]:
     n = mean.shape[0]
     cov = _symmetrize(cov)
-    jitter = jnp.asarray(1e-9, dtype=cov.dtype)
     Wm, Wc, c = _ukf_weights(n, alpha, beta, kappa, cov.dtype)
-    chol = jnp.linalg.cholesky(c * cov + jitter * jnp.eye(n, dtype=cov.dtype))
+    chol = jnp.linalg.cholesky(c * cov)
     offsets = jnp.swapaxes(chol, 0, 1)
     sigma = jnp.concatenate(
         [mean[None], mean[None] + offsets, mean[None] - offsets],
@@ -68,33 +70,18 @@ def _cross_covariance(
     return jnp.einsum("i,ij,ik->jk", weights, x_centered, y_centered)
 
 
-def _gaussian_log_likelihood(innovation: Array, covariance: Array) -> Array:
-    innovation = innovation[:, None]
-    solved = jnp.linalg.solve(covariance, innovation)
-    mahalanobis = (innovation.T @ solved).squeeze()
-    sign, logdet = jnp.linalg.slogdet(covariance)
-    dim = covariance.shape[0]
-    normalizer = dim * jnp.log(jnp.asarray(2.0 * jnp.pi, dtype=covariance.dtype))
-    return jnp.where(
-        sign > 0,
-        -0.5 * (mahalanobis + logdet + normalizer),
-        jnp.asarray(-jnp.inf, dtype=covariance.dtype),
-    )
-
-
 def ukf(
     model_or_f: DynamicsLike,
-    Q_noise: Array,
-    R_noise: Array,
     ys: Array,
-    us: Array,
-    x0: Array,
-    P0: Array,
     *,
+    Q: Array,
+    R: Array,
+    us: Array | None = None,
+    x0: Array | None = None,
+    P0: Array | None = None,
     observation: ObservationFn | None = None,
-    alpha: float = 1.0,
-    beta: float = 2.0,
-    kappa: float = 0.0,
+    has_measurement: Array | None = None,
+    solver: UKF | None = None,
 ) -> UKFResult:
     """Run an unscented Kalman filter for nonlinear dynamics and observations.
 
@@ -102,27 +89,27 @@ def ukf(
     propagate means and covariances through the nonlinear transition and
     observation models.
 
-    This is a baseline nonlinear recursive estimation path that is often more
-    robust than `ekf()` when the observation model is strongly curved. The
-    current implementation assumes additive process and measurement noise and
-    keeps the public API deliberately small.
+    Assumes additive process and measurement noise and positive-definite
+    sigma-point/innovation covariances. No jitter or covariance repair is added.
+    Supports jit, vmap, JVP and VJP through JAX model callbacks. A single
+    innovation Cholesky factor serves both the gain and Gaussian likelihood.
 
     Args:
         model_or_f: Nonlinear system model or dynamics function.
-        Q_noise: Process noise covariance. Shape: `(n, n)`.
-        R_noise: Measurement noise covariance. Shape: `(p, p)`.
+        Q: Process noise covariance. Shape: `(n, n)`.
+        R: Measurement noise covariance. Shape: `(p, p)`.
         ys: Measurement sequence. Shape: `(T, p)`.
-        us: Input sequence. Shape: `(T, m)`.
-        x0: Initial mean. Shape: `(n,)`.
-        P0: Initial covariance. Shape: `(n, n)`.
+        us: Optional controls, shape `(T, m)` or `(T, 2, m)` for sampled FOH.
+            Defaults to zero inputs; declare model.input_dim or pass us for
+            controlled nonlinear models.
+        x0: Initial prior mean, shape `(n,)`. Defaults to zeros.
+        P0: Initial prior covariance, shape `(n, n)`. Defaults to identity.
         observation: Observation function `h(x)` for plain dynamics callables.
             Omit this when passing a system model with its own output map.
-        alpha: Sigma-point spread parameter. The default is intentionally wider
-            than the very small textbook setting so the baseline implementation
-            stays numerically well-behaved on the current small-system focus.
-        beta: Prior-distribution parameter. `2.0` is standard for Gaussian
-            priors.
-        kappa: Secondary sigma-point scaling parameter.
+        has_measurement: Whole-observation flags, shape `(T,)`. Missing samples
+            may contain NaNs; their innovation, predicted measurement,
+            innovation covariance and log-likelihood term are zero placeholders.
+        solver: Sigma-point settings, default contrax.solvers.UKF().
 
     Returns:
         [UKFResult][contrax.types.UKFResult]: A bundle containing filtered
@@ -137,17 +124,20 @@ def ukf(
         >>> def h(x):
         ...     return jnp.array([x[0] ** 2])
         >>> result = cx.ukf(
-        ...     f,
-        ...     Q_noise=1e-3 * jnp.eye(2),
-        ...     R_noise=1e-2 * jnp.eye(1),
-        ...     ys=jnp.zeros((10, 1)),
-        ...     us=jnp.zeros((10, 1)),
-        ...     x0=jnp.ones(2),
-        ...     P0=jnp.eye(2),
-        ...     observation=h,
+        ...     f, jnp.zeros((10, 1)), Q=1e-3 * jnp.eye(2), R=1e-2 * jnp.eye(1),
+        ...     us=jnp.zeros((10, 1)), x0=jnp.ones(2), observation=h,
         ... )
     """
 
+    solver = UKF() if solver is None else solver
+    if not isinstance(solver, UKF):
+        raise TypeError("ukf solver must be contrax.solvers.UKF")
+    ys, Q, R, us, x0, P0, flags = prepare_filter(
+        model_or_f, ys, Q, R, us, x0, P0, has_measurement
+    )
+    alpha, beta, kappa = solver.alpha, solver.beta, solver.kappa
+    if x0.shape[0] + kappa <= 0:
+        raise ValueError("UKF requires n+kappa > 0")
     if _is_system_model(model_or_f):
         if observation is not None:
             raise ValueError("ukf(sys, ...) does not accept observation=.")
@@ -172,29 +162,57 @@ def ukf(
     # Update-then-predict: x0/P0 is the prior on x_0.
     def update_predict(carry, inputs):
         x_prior, P_prior = carry
-        y, u, t = inputs
+        y, u, t, available = inputs
 
-        # Update: unscented transform through h using the current prior.
-        sigma_obs, Wm_obs, Wc_obs = _sigma_points(x_prior, P_prior, alpha, beta, kappa)
-        y_sigma = jax.vmap(lambda s: h(t, s, u))(sigma_obs)
-        y_pred = jnp.einsum("i,ij->j", Wm_obs, y_sigma)
-        y_centered = y_sigma - y_pred
-        S = _weighted_covariance(y_centered, Wc_obs) + R_noise
-        S = _symmetrize(S)
-        x_centered = sigma_obs - x_prior
-        Pxy = _cross_covariance(x_centered, y_centered, Wc_obs)
-        K = jnp.linalg.solve(S.T, Pxy.T).T
-        innov = y - y_pred
-        x_post = x_prior + K @ innov
-        P_post = _symmetrize(P_prior - K @ S @ K.T)
-        log_likelihood = _gaussian_log_likelihood(innov, S)
+        def apply_update():
+            sigma_obs, Wm_obs, Wc_obs = _sigma_points(
+                x_prior, P_prior, alpha, beta, kappa
+            )
+            y_sigma = jax.vmap(lambda s: h(t, s, u))(sigma_obs)
+            if y_sigma.shape != (sigma_obs.shape[0], y.shape[0]):
+                raise ValueError("The observation map must return a vector matching y")
+            y_pred = jnp.einsum("i,ij->j", Wm_obs, y_sigma)
+            y_centered = y_sigma - y_pred
+            S = _symmetrize(_weighted_covariance(y_centered, Wc_obs) + R)
+            Pxy = _cross_covariance(sigma_obs - x_prior, y_centered, Wc_obs)
+            observed = jnp.where(available, y, jnp.zeros_like(y))
+            innov = observed - y_pred
+            # Reuse the innovation factor for gain and likelihood. The shared
+            # triangular solve whitens both cross covariance and residual.
+            L = jnp.linalg.cholesky(S)
+            whitened = solve_triangular(
+                L, jnp.concatenate([Pxy.T, innov[:, None]], axis=1), lower=True
+            )
+            K = solve_triangular(L.T, whitened[:, :-1], lower=False).T
+            x_post = x_prior + K @ innov
+            P_post = _symmetrize(P_prior - whitened[:, :-1].T @ whitened[:, :-1])
+            logdet = 2 * jnp.sum(jnp.log(jnp.diag(L)))
+            normalizer = y.shape[0] * jnp.log(jnp.asarray(2 * jnp.pi, dtype=S.dtype))
+            log_likelihood = -0.5 * (
+                jnp.sum(whitened[:, -1] ** 2) + logdet + normalizer
+            )
+            return x_post, P_post, innov, y_pred, S, log_likelihood
+
+        def skip_update():
+            return (
+                x_prior,
+                P_prior,
+                jnp.zeros_like(y),
+                jnp.zeros_like(y),
+                jnp.zeros_like(R),
+                jnp.zeros((), dtype=x_prior.dtype),
+            )
+
+        x_post, P_post, innov, y_pred, S, log_likelihood = jax.lax.cond(
+            available, apply_update, skip_update
+        )
 
         # Predict: unscented transform through f from the posterior.
         sigma, Wm, Wc = _sigma_points(x_post, P_post, alpha, beta, kappa)
         sigma_pred = jax.vmap(lambda s: f(t, s, u))(sigma)
         x_next = jnp.einsum("i,ij->j", Wm, sigma_pred)
         sigma_pred_centered = sigma_pred - x_next
-        P_next = _weighted_covariance(sigma_pred_centered, Wc) + Q_noise
+        P_next = _weighted_covariance(sigma_pred_centered, Wc) + Q
         P_next = _symmetrize(P_next)
         P_cross = _cross_covariance(sigma - x_post, sigma_pred_centered, Wc)
 
@@ -223,11 +241,12 @@ def ukf(
             predicted_state_covariances,
             transition_cross_covariances,
         ),
-    ) = jax.lax.scan(update_predict, (x0, _symmetrize(P0)), (ys, us, ts))
+    ) = jax.lax.scan(update_predict, (x0, _symmetrize(P0)), (ys, us, ts, flags))
     return UKFResult(
-        x_hat=x_hats,
-        P=Ps,
+        xs=x_hats,
+        Ps=Ps,
         innovations=innovations,
+        has_measurement=flags,
         predicted_measurements=predicted_measurements,
         innovation_covariances=innovation_covariances,
         log_likelihood_terms=log_likelihood_terms,
@@ -238,27 +257,18 @@ def ukf(
 
 
 def uks(
-    model_or_f: DynamicsLike,
     result: UKFResult,
-    Q_noise: Array,
-    us: Array,
-    *,
-    alpha: float = 1.0,
-    beta: float = 2.0,
-    kappa: float = 0.0,
 ) -> RTSResult:
     """Run an unscented Rauch-Tung-Striebel-style smoother.
 
-    Applies a backward smoothing pass to the output of `ukf()` using the same
-    nonlinear dynamics model, process noise covariance, and input sequence.
+    Uses the predicted means, covariances and transition cross-covariances
+    retained by ukf. No model evaluation or repeated sigma-point transform is
+    needed. Supports jit, vmap, JVP and VJP. Empty passes return empty results.
     """
-    del model_or_f, Q_noise, alpha, beta, kappa
-    x_hats = result.x_hat
-    Ps = result.P
-    if us.shape[0] != x_hats.shape[0]:
-        raise ValueError(
-            "uks() requires us to have the same leading length as the filtered result."
-        )
+    x_hats = result.xs
+    Ps = result.Ps
+    if x_hats.shape[0] == 0:
+        return RTSResult(xs=x_hats, Ps=Ps)
 
     def smooth_step(carry, inputs):
         x_s, P_s = carry
@@ -282,4 +292,4 @@ def uks(
     )
     x_smooth = jnp.concatenate([x_smooth_rev[::-1], x_hats[-1:]], axis=0)
     P_smooth = jnp.concatenate([P_smooth_rev[::-1], Ps[-1:]], axis=0)
-    return RTSResult(x_smooth=x_smooth, P_smooth=P_smooth)
+    return RTSResult(xs=x_smooth, Ps=P_smooth)

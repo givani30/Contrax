@@ -26,31 +26,31 @@ def test_batch_matches_online_with_controls_feedthrough_and_missing_data(dtype, 
     solver = cx.solvers.Kalman(covariance_update=method)
     batch = jax.jit(
         lambda q: cx.kalman(
-            sys, q, R, ys, x0, P0, us=us, has_measurement=flags, solver=solver
+            sys, ys, Q=q, R=R, x0=x0, P0=P0, us=us, has_measurement=flags, solver=solver
         )
     )(Q)
-    x, P, innovation = cx.kalman_update(sys, x0, P0, ys[0], R, us[0], solver=solver)
+    x, P, innovation = cx.kalman_update(sys, x0, P0, ys[0], R=R, u=us[0], solver=solver)
     expected = [(x, P, innovation)]
     for k in range(1, 3):
         # The transition uses u[k-1]; the measurement uses u[k]. The step
         # convenience function shares one u, so separate helpers express this.
-        x, P = cx.kalman_predict(sys, x, P, Q, us[k - 1])
+        x, P = cx.kalman_predict(sys, x, P, Q=Q, u=us[k - 1])
         x, P, innovation = cx.kalman_update(
-            sys, x, P, ys[k], R, us[k], has_measurement=flags[k], solver=solver
+            sys, x, P, ys[k], R=R, u=us[k], has_measurement=flags[k], solver=solver
         )
         expected.append((x, P, innovation))
     for actual, reference in zip(
-        (batch.x_hat, batch.P, batch.innovations), zip(*expected)
+        (batch.xs, batch.Ps, batch.innovations), zip(*expected)
     ):
         np.testing.assert_allclose(actual, jnp.stack(reference), atol=1e-6, rtol=1e-6)
         assert actual.dtype == dtype
-    assert jnp.all(jnp.linalg.eigvalsh(batch.P) >= 0)
+    assert jnp.all(jnp.linalg.eigvalsh(batch.Ps) >= 0)
     assert jnp.all(batch.innovations[1] == 0)
 
 
-@pytest.mark.parametrize("extended", [False, True])
+@pytest.mark.parametrize("kind", ["kalman", "ekf", "ukf"])
 def test_missing_nan_measurements_have_finite_noise_gradients_under_jit_and_vmap(
-    extended,
+    kind,
 ):
     sys = cx.dss(
         jnp.array([[0.9]]), jnp.ones((1, 1)), jnp.ones((1, 1)), jnp.zeros((1, 1)), dt=1
@@ -60,7 +60,7 @@ def test_missing_nan_measurements_have_finite_noise_gradients_under_jit_and_vmap
 
     def loss(log_noise):
         Q, R = jnp.exp(log_noise[0]) * jnp.eye(1), jnp.exp(log_noise[1]) * jnp.eye(1)
-        if extended:
+        if kind == "ekf":
             model = cx.nonlinear_system(
                 lambda t, x, u: sys.A @ x + sys.B @ u,
                 output=lambda t, x, u: sys.C @ x + sys.D @ u,
@@ -68,18 +68,18 @@ def test_missing_nan_measurements_have_finite_noise_gradients_under_jit_and_vmap
             )
             result = cx.ekf(
                 model,
-                Q,
-                R,
                 ys,
-                us,
-                jnp.zeros(1),
-                jnp.eye(1),
+                Q=Q,
+                R=R,
+                us=us,
+                x0=jnp.zeros(1),
+                P0=jnp.eye(1),
                 has_measurement=flags,
                 solver=cx.solvers.EKF(num_iter=3),
             )
         else:
-            result = cx.kalman(sys, Q, R, ys, us=us, has_measurement=flags)
-        return jnp.sum(result.x_hat**2) + jnp.sum(result.P)
+            result = getattr(cx, kind)(sys, ys, Q=Q, R=R, us=us, has_measurement=flags)
+        return jnp.sum(result.xs**2) + jnp.sum(result.Ps)
 
     parameters = jnp.array([-3.0, -2.0])
     gradient = jax.jit(jax.grad(loss))(parameters)
@@ -104,7 +104,7 @@ def test_missing_observation_does_not_evaluate_invalid_measurement_model():
             x,
             jnp.eye(1),
             jnp.array([jnp.nan]),
-            jnp.eye(1),
+            R=jnp.eye(1),
             has_measurement=False,
         )
         return jnp.sum(mean + covariance + innovation)
@@ -124,27 +124,65 @@ def test_batch_iterated_ekf_matches_online_update_and_empty_horizon():
     solver = cx.solvers.EKF(num_iter=4)
     batch = cx.ekf(
         f,
-        Q,
-        R,
         jnp.array([[2.0]]),
-        jnp.zeros((1, 1)),
-        x0,
-        P0,
+        Q=Q,
+        R=R,
+        us=jnp.zeros((1, 1)),
+        x0=x0,
+        P0=P0,
         observation=h,
         solver=solver,
     )
-    online = cx.ekf_update(h, x0, P0, jnp.array([2.0]), R, solver=solver)
-    np.testing.assert_allclose(batch.x_hat[0], online[0], atol=1e-12)
-    np.testing.assert_allclose(batch.P[0], online[1], atol=1e-12)
+    online = cx.ekf_update(h, x0, P0, jnp.array([2.0]), R=R, solver=solver)
+    np.testing.assert_allclose(batch.xs[0], online[0], atol=1e-12)
+    np.testing.assert_allclose(batch.Ps[0], online[1], atol=1e-12)
     empty = cx.ekf(
         f,
-        Q,
-        R,
         jnp.empty((0, 1)),
-        jnp.empty((0, 1)),
-        x0,
-        P0,
+        Q=Q,
+        R=R,
+        us=jnp.empty((0, 1)),
+        x0=x0,
+        P0=P0,
         observation=h,
         solver=solver,
     )
-    assert empty.x_hat.shape == (0, 1)
+    assert empty.xs.shape == (0, 1)
+    np.testing.assert_allclose(batch.final_state, batch.xs[-1])
+    with pytest.raises(ValueError, match="empty trajectory"):
+        _ = empty.final_state
+    linear = cx.dss([[0.9]], [[1.0]], [[1.0]], [[0.0]], 1.0)
+    for filter_fn in (cx.kalman, cx.ukf):
+        empty = filter_fn(linear, jnp.empty((0, 1)), Q=Q, R=R)
+        assert empty.xs.shape == (0, 1)
+        with pytest.raises(ValueError, match="empty trajectory"):
+            _ = empty.final_state
+    empty_innovations, empty_likelihood = cx.ukf_diagnostics(empty)
+    assert not empty_innovations.nonfinite and not empty_likelihood.nonfinite
+    assert empty_likelihood.total_log_likelihood == 0
+
+
+def test_sampled_foh_batch_filters_match_exact_linear_model_and_default_controls():
+    """x'=u has exact FOH increment dt*(u_left+u_right)/2."""
+    model = cx.sample_system(
+        cx.nonlinear_system(
+            lambda t, x, u: u,
+            output=lambda t, x, u: x + 2 * u,
+            input_dim=1,
+        ),
+        0.2,
+        method="rk4",
+        input_interpolation="foh",
+    )
+    exact = cx.dss([[1.0]], [[0.1, 0.1]], [[1.0]], [[2.0, 0.0]], 0.2)
+    ys = jnp.array([[2.0], [4.2], [6.5]])
+    us = jnp.array([[[1.0], [2.0]], [[2.0], [3.0]], [[3.0], [4.0]]])
+    Q, R = jnp.eye(1) * 0.01, jnp.eye(1) * 0.1
+    expected = cx.kalman(exact, ys, Q=Q, R=R, us=us[..., 0])
+    for filter_fn in (cx.ekf, cx.ukf):
+        actual = jax.jit(lambda: filter_fn(model, ys, Q=Q, R=R, us=us))()
+        np.testing.assert_allclose(actual.xs, expected.xs, atol=1e-10)
+        np.testing.assert_allclose(actual.Ps, expected.Ps, atol=1e-10)
+        omitted = filter_fn(model, ys, Q=Q, R=R)
+        explicit = filter_fn(model, ys, Q=Q, R=R, us=jnp.zeros_like(us))
+        np.testing.assert_allclose(omitted.xs, explicit.xs, atol=1e-12)

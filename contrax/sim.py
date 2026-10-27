@@ -92,7 +92,15 @@ def _simulate_nonlinear_discrete(
         ts,
     )
     xs_full = jnp.concatenate([x0[None], xs], axis=0)
-    return SimResult(ts, xs_full, ys, solver_status=status, num_steps=count)
+    return SimResult(
+        ts,
+        xs_full,
+        ys,
+        state_times=jnp.arange(T + 1, dtype=ts.dtype)
+        * jnp.asarray(sys.dt, dtype=ts.dtype),
+        solver_status=status,
+        num_steps=count,
+    )
 
 
 def _build_continuous_save_grid(duration: float, dt: float | None, dtype: Any) -> Array:
@@ -139,7 +147,7 @@ def _simulate_continuous(
             if isinstance(sys, ContLTI)
             else sys.output(ts[0], x0, u0)
         )
-        result = SimResult(ts, x0[None], y0[None])
+        result = SimResult(ts, x0[None], y0[None], state_times=ts)
         return (
             eqx.error_if(result, ~result.successful, "Continuous simulation failed")
             if throw
@@ -184,6 +192,7 @@ def _simulate_continuous(
         ts,
         xs,
         ys,
+        state_times=ts,
         solver_status=_diffrax_status(solution),
         num_steps=solution.stats["num_steps"],
     )
@@ -246,6 +255,8 @@ def simulate(
         unpacking. For [DiscLTI][contrax.systems.DiscLTI], shapes are `(T,)`,
         `(T + 1, n)`, and `(T, p)`; for continuous systems, `(N,)`, `(N, n)`,
         and `(N, p)` where `N` is the number of saved samples on the output grid.
+        Use state_times with xs and output_times with ys; the discrete terminal
+        state has its own time. final_state returns the last state.
 
     Examples:
         >>> import jax
@@ -295,6 +306,8 @@ def simulate(
             raise ValueError("simulate() for DiscLTI requires num_steps.")
         result = SimResult(
             *_simulate_discrete(sys, x0, policy, num_steps),
+            state_times=jnp.arange(num_steps + 1, dtype=x0.real.dtype)
+            * jnp.asarray(sys.dt, dtype=x0.real.dtype),
             num_steps=jnp.asarray(num_steps),
         )
         return (

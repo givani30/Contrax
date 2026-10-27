@@ -70,18 +70,10 @@ def sample_measurements(x_true):
 
 
 def summarize_rmse(filtered, smoothed, truth):
-    filtered_q_rmse = float(
-        jnp.sqrt(jnp.mean((filtered.x_hat[:, 0] - truth[:, 0]) ** 2))
-    )
-    smoothed_q_rmse = float(
-        jnp.sqrt(jnp.mean((smoothed.x_smooth[:, 0] - truth[:, 0]) ** 2))
-    )
-    filtered_p_rmse = float(
-        jnp.sqrt(jnp.mean((filtered.x_hat[:, 1] - truth[:, 1]) ** 2))
-    )
-    smoothed_p_rmse = float(
-        jnp.sqrt(jnp.mean((smoothed.x_smooth[:, 1] - truth[:, 1]) ** 2))
-    )
+    filtered_q_rmse = float(jnp.sqrt(jnp.mean((filtered.xs[:, 0] - truth[:, 0]) ** 2)))
+    smoothed_q_rmse = float(jnp.sqrt(jnp.mean((smoothed.xs[:, 0] - truth[:, 0]) ** 2)))
+    filtered_p_rmse = float(jnp.sqrt(jnp.mean((filtered.xs[:, 1] - truth[:, 1]) ** 2)))
+    smoothed_p_rmse = float(jnp.sqrt(jnp.mean((smoothed.xs[:, 1] - truth[:, 1]) ** 2)))
     return {
         "filtered_q_rmse": filtered_q_rmse,
         "smoothed_q_rmse": smoothed_q_rmse,
@@ -97,22 +89,22 @@ def run_example():
 
     filtered = cx.ukf(
         SYS_DISC,
-        Q_noise=Q_NOISE,
-        R_noise=R_NOISE,
-        ys=ys,
+        ys,
         us=INPUTS,
         x0=X0_EST,
         P0=P0,
-        alpha=0.5,
+        Q=Q_NOISE,
+        R=R_NOISE,
+        solver=cx.solvers.UKF(alpha=0.5),
     )
-    smoothed = cx.uks(SYS_DISC, filtered, Q_noise=Q_NOISE, us=INPUTS, alpha=0.5)
+    smoothed = cx.uks(filtered)
     innovation_diag, likelihood_diag = cx.ukf_diagnostics(filtered)
     structure_diag = cx.phs_diagnostics(SYS_CONT, X0_TRUE, INPUTS[0])
     rmse = summarize_rmse(filtered, smoothed, x_true)
 
-    assert filtered.x_hat.shape == (NUM_STEPS, 2)
+    assert filtered.xs.shape == (NUM_STEPS, 2)
     assert filtered.predicted_measurements.shape == (NUM_STEPS, 1)
-    assert smoothed.x_smooth.shape == (NUM_STEPS, 2)
+    assert smoothed.xs.shape == (NUM_STEPS, 2)
     assert rmse["smoothed_q_rmse"] < rmse["filtered_q_rmse"]
     assert rmse["smoothed_p_rmse"] < rmse["filtered_p_rmse"]
 
@@ -121,11 +113,11 @@ def run_example():
         "inputs": INPUTS[:, 0],
         "measurements": ys[:, 0],
         "true_q": x_true[:, 0],
-        "filtered_q": filtered.x_hat[:, 0],
-        "smoothed_q": smoothed.x_smooth[:, 0],
+        "filtered_q": filtered.xs[:, 0],
+        "smoothed_q": smoothed.xs[:, 0],
         "true_p": x_true[:, 1],
-        "filtered_p": filtered.x_hat[:, 1],
-        "smoothed_p": smoothed.x_smooth[:, 1],
+        "filtered_p": filtered.xs[:, 1],
+        "smoothed_p": smoothed.xs[:, 1],
         **rmse,
         "mean_nis": float(innovation_diag.mean_nis),
         "max_condition_number": float(

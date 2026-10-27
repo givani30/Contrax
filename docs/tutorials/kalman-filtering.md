@@ -27,7 +27,7 @@ x_{k+1} = A x_k + w_k, \qquad
 y_k = C x_k + v_k
 $$
 
-with Gaussian noise covariances `Q_noise` and `R_noise`. The batch filter uses
+with Gaussian noise covariances `Q` and `R`. The batch filter uses
 the update-first convention:
 
 $$

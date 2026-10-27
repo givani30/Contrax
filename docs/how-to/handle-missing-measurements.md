@@ -24,17 +24,7 @@ def h(x):
 
 @jax.jit
 def one_step(x, P, y, u, has_measurement):
-    return cx.ekf_step(
-        f,
-        x,
-        P,
-        u,
-        y,
-        Q,
-        R,
-        observation=h,
-        has_measurement=has_measurement,
-    )
+    return cx.ekf_step(f, x, P, y, u=u, Q=Q, R=R, observation=h, has_measurement=has_measurement)
 
 
 x = jnp.array([1.0])

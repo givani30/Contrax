@@ -85,16 +85,16 @@ def sample_measurements(x_true):
 
 def summarize_rmse(filtered, smoothed, truth):
     filtered_theta_rmse = float(
-        jnp.sqrt(jnp.mean((filtered.x_hat[:, 0] - truth[:, 0]) ** 2))
+        jnp.sqrt(jnp.mean((filtered.xs[:, 0] - truth[:, 0]) ** 2))
     )
     smoothed_theta_rmse = float(
-        jnp.sqrt(jnp.mean((smoothed.x_smooth[:, 0] - truth[:, 0]) ** 2))
+        jnp.sqrt(jnp.mean((smoothed.xs[:, 0] - truth[:, 0]) ** 2))
     )
     filtered_rate_rmse = float(
-        jnp.sqrt(jnp.mean((filtered.x_hat[:, 1] - truth[:, 1]) ** 2))
+        jnp.sqrt(jnp.mean((filtered.xs[:, 1] - truth[:, 1]) ** 2))
     )
     smoothed_rate_rmse = float(
-        jnp.sqrt(jnp.mean((smoothed.x_smooth[:, 1] - truth[:, 1]) ** 2))
+        jnp.sqrt(jnp.mean((smoothed.xs[:, 1] - truth[:, 1]) ** 2))
     )
     return {
         "filtered_theta_rmse": filtered_theta_rmse,
@@ -111,27 +111,21 @@ def run_example():
 
     filtered = cx.ukf(
         SYS_DISC,
-        Q_noise=Q_NOISE,
-        R_noise=R_NOISE,
-        ys=ys,
+        ys,
         us=INPUTS_FOH,
         x0=X0_EST,
         P0=P0,
-        alpha=0.45,
+        Q=Q_NOISE,
+        R=R_NOISE,
+        solver=cx.solvers.UKF(alpha=0.45),
     )
-    smoothed = cx.uks(
-        SYS_DISC,
-        filtered,
-        Q_noise=Q_NOISE,
-        us=INPUTS_FOH,
-        alpha=0.45,
-    )
+    smoothed = cx.uks(filtered)
     innovation_diag, likelihood_diag = cx.ukf_diagnostics(filtered)
     rmse = summarize_rmse(filtered, smoothed, x_true)
 
-    assert filtered.x_hat.shape == (NUM_STEPS, 2)
+    assert filtered.xs.shape == (NUM_STEPS, 2)
     assert filtered.predicted_measurements.shape == (NUM_STEPS, 1)
-    assert smoothed.x_smooth.shape == (NUM_STEPS, 2)
+    assert smoothed.xs.shape == (NUM_STEPS, 2)
     assert rmse["smoothed_theta_rmse"] < rmse["filtered_theta_rmse"]
     assert rmse["smoothed_rate_rmse"] < rmse["filtered_rate_rmse"]
 
@@ -140,11 +134,11 @@ def run_example():
         "inputs": INPUT_SAMPLES[:, 0],
         "measurements": ys[:, 0],
         "true_theta": x_true[:, 0],
-        "filtered_theta": filtered.x_hat[:, 0],
-        "smoothed_theta": smoothed.x_smooth[:, 0],
+        "filtered_theta": filtered.xs[:, 0],
+        "smoothed_theta": smoothed.xs[:, 0],
         "true_rate": x_true[:, 1],
-        "filtered_rate": filtered.x_hat[:, 1],
-        "smoothed_rate": smoothed.x_smooth[:, 1],
+        "filtered_rate": filtered.xs[:, 1],
+        "smoothed_rate": smoothed.xs[:, 1],
         **rmse,
         "mean_nis": float(innovation_diag.mean_nis),
         "max_condition_number": float(

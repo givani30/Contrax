@@ -28,14 +28,14 @@ def test_kalman_converges_to_constant_measurement():
     ys = jnp.ones((80, 1))
     result = cx.kalman(
         sys,
-        Q_noise=jnp.array([[1e-4]]),
-        R_noise=jnp.array([[1e-3]]),
-        ys=ys,
+        ys,
         x0=jnp.array([0.0]),
         P0=jnp.array([[1.0]]),
+        Q=jnp.array([[0.0001]]),
+        R=jnp.array([[0.001]]),
     )
 
-    assert abs(float(result.x_hat[-1, 0]) - 1.0) < 1e-3
+    assert abs(float(result.xs[-1, 0]) - 1.0) < 1e-3
     assert abs(float(result.innovations[-1, 0])) < 1e-3
 
 
@@ -55,15 +55,15 @@ def test_kalman_step_matches_batch_filter():
     R = jnp.array([[1e-2]])
     x0 = jnp.array([0.0])
     P0 = jnp.array([[1.0]])
-    batch = cx.kalman(sys, Q, R, ys, x0=x0, P0=P0)
+    batch = cx.kalman(sys, ys, Q=Q, R=R, x0=x0, P0=P0)
 
     # Step 0: update x0 directly (no predict — x0 is prior on x_0)
-    x_hat_0, P_hat_0, innov_0 = cx.kalman_update(sys, x0, P0, ys[0], R)
+    x_hat_0, P_hat_0, innov_0 = cx.kalman_update(sys, x0, P0, ys[0], R=R)
 
     # Steps 1+: kalman_step from the previous posterior
     def one_step(carry, y):
         x, P = carry
-        x_new, P_new, innov = cx.kalman_step(sys, x, P, y, Q, R)
+        x_new, P_new, innov = cx.kalman_step(sys, x, P, y, Q=Q, R=R)
         return (x_new, P_new), (x_new, P_new, innov)
 
     _, (x_hats_rest, Ps_rest, innovs_rest) = jax.lax.scan(
@@ -73,8 +73,8 @@ def test_kalman_step_matches_batch_filter():
     Ps = jnp.concatenate([P_hat_0[None], Ps_rest], axis=0)
     innovations = jnp.concatenate([innov_0[None], innovs_rest], axis=0)
 
-    assert jnp.allclose(x_hats, batch.x_hat, atol=1e-12)
-    assert jnp.allclose(Ps, batch.P, atol=1e-12)
+    assert jnp.allclose(x_hats, batch.xs, atol=1e-12)
+    assert jnp.allclose(Ps, batch.Ps, atol=1e-12)
     assert jnp.allclose(innovations, batch.innovations, atol=1e-12)
 
 
@@ -87,10 +87,10 @@ def test_kalman_step_can_skip_missing_measurement_under_jit():
     P = jnp.array([[0.5]])
 
     def step(has_measurement):
-        return cx.kalman_step(sys, x, P, y, Q, R, has_measurement=has_measurement)
+        return cx.kalman_step(sys, x, P, y, Q=Q, R=R, has_measurement=has_measurement)
 
     x_skip, P_skip, innov_skip = jax.jit(step)(jnp.array(False))
-    x_pred, P_pred = cx.kalman_predict(sys, x, P, Q)
+    x_pred, P_pred = cx.kalman_predict(sys, x, P, Q=Q)
 
     assert jnp.allclose(x_skip, x_pred, atol=1e-12)
     assert jnp.allclose(P_skip, P_pred, atol=1e-12)
@@ -138,7 +138,7 @@ def test_ekf_matches_kalman_for_linear_system():
     x0 = jnp.array([0.0])
     P0 = jnp.array([[1.0]])
 
-    kf = cx.kalman(sys, Q, R, ys, x0=x0, P0=P0)
+    kf = cx.kalman(sys, ys, Q=Q, R=R, x0=x0, P0=P0)
 
     def f(t, x, u):
         return sys.A @ x + sys.B @ u
@@ -146,10 +146,10 @@ def test_ekf_matches_kalman_for_linear_system():
     def h(x):
         return sys.C @ x
 
-    ekf = cx.ekf(f, Q, R, ys, us, x0, P0, observation=h)
+    ekf = cx.ekf(f, ys, Q=Q, R=R, us=us, x0=x0, P0=P0, observation=h)
 
-    assert jnp.allclose(ekf.x_hat, kf.x_hat, atol=1e-12)
-    assert jnp.allclose(ekf.P, kf.P, atol=1e-12)
+    assert jnp.allclose(ekf.xs, kf.xs, atol=1e-12)
+    assert jnp.allclose(ekf.Ps, kf.Ps, atol=1e-12)
     assert jnp.allclose(ekf.innovations, kf.innovations, atol=1e-12)
 
 
@@ -170,11 +170,11 @@ def test_ekf_accepts_nonlinear_system_object():
     x0 = jnp.array([0.0])
     P0 = jnp.array([[1.0]])
 
-    result = cx.ekf(sys, Q, R, ys, us, x0, P0)
-    reference = cx.kalman(scalar_sys, Q, R, ys, x0=x0, P0=P0)
+    result = cx.ekf(sys, ys, Q=Q, R=R, us=us, x0=x0, P0=P0)
+    reference = cx.kalman(scalar_sys, ys, Q=Q, R=R, x0=x0, P0=P0)
 
-    assert jnp.allclose(result.x_hat, reference.x_hat, atol=1e-12)
-    assert jnp.allclose(result.P, reference.P, atol=1e-12)
+    assert jnp.allclose(result.xs, reference.xs, atol=1e-12)
+    assert jnp.allclose(result.Ps, reference.Ps, atol=1e-12)
     assert jnp.allclose(result.innovations, reference.innovations, atol=1e-12)
 
 
@@ -204,7 +204,7 @@ def test_ekf_step_matches_batch_filter():
         output_dim=1,
     )
 
-    batch = cx.ekf(nonlinear, Q, R, ys, us, x0, P0)
+    batch = cx.ekf(nonlinear, ys, Q=Q, R=R, us=us, x0=x0, P0=P0)
 
     # Step 0: update x0 directly (x0 is prior on x_0)
     def f(t, x, u):
@@ -213,22 +213,13 @@ def test_ekf_step_matches_batch_filter():
     def h(x):
         return sys.C @ x
 
-    x_hat_0, P_hat_0, innov_0 = cx.ekf_update(h, x0, P0, ys[0], R)
+    x_hat_0, P_hat_0, innov_0 = cx.ekf_update(h, x0, P0, ys[0], R=R)
 
     # Steps 1+: ekf_step from the previous posterior
     def one_step(carry, inputs):
         x, P = carry
         y, u = inputs
-        x_new, P_new, innov = cx.ekf_step(
-            f,
-            x,
-            P,
-            u,
-            y,
-            Q,
-            R,
-            observation=h,
-        )
+        x_new, P_new, innov = cx.ekf_step(f, x, P, y, u=u, Q=Q, R=R, observation=h)
         return (x_new, P_new), (x_new, P_new, innov)
 
     _, (x_hats_rest, Ps_rest, innovs_rest) = jax.lax.scan(
@@ -238,8 +229,8 @@ def test_ekf_step_matches_batch_filter():
     Ps = jnp.concatenate([P_hat_0[None], Ps_rest], axis=0)
     innovations = jnp.concatenate([innov_0[None], innovs_rest], axis=0)
 
-    assert jnp.allclose(x_hats, batch.x_hat, atol=1e-12)
-    assert jnp.allclose(Ps, batch.P, atol=1e-12)
+    assert jnp.allclose(x_hats, batch.xs, atol=1e-12)
+    assert jnp.allclose(Ps, batch.Ps, atol=1e-12)
     assert jnp.allclose(innovations, batch.innovations, atol=1e-12)
 
 
@@ -338,18 +329,13 @@ def test_rts_shapes_and_terminal_state_matches_filter():
     sys = _scalar_sys()
     Q = jnp.zeros((1, 1))
     ys = jnp.linspace(0.0, 1.0, 20)[:, None]
-    kf = cx.kalman(
-        sys,
-        Q_noise=Q,
-        R_noise=jnp.array([[1e-2]]),
-        ys=ys,
-    )
-    smoothed = cx.rts(sys, kf, Q_noise=Q)
+    kf = cx.kalman(sys, ys, Q=Q, R=jnp.array([[0.01]]))
+    smoothed = cx.rts(sys, kf, Q=Q)
 
-    assert smoothed.x_smooth.shape == kf.x_hat.shape
-    assert smoothed.P_smooth.shape == kf.P.shape
-    assert jnp.allclose(smoothed.x_smooth[-1], kf.x_hat[-1])
-    assert jnp.allclose(smoothed.P_smooth[-1], kf.P[-1])
+    assert smoothed.xs.shape == kf.xs.shape
+    assert smoothed.Ps.shape == kf.Ps.shape
+    assert jnp.allclose(smoothed.xs[-1], kf.xs[-1])
+    assert jnp.allclose(smoothed.Ps[-1], kf.Ps[-1])
 
 
 def test_uks_matches_rts_for_linear_system():
@@ -369,17 +355,13 @@ def test_uks_matches_rts_for_linear_system():
     x0 = jnp.array([0.0])
     P0 = jnp.array([[1.0]])
 
-    filtered_linear = cx.kalman(sys, Q, R, ys, x0=x0, P0=P0)
-    filtered_nonlinear = cx.ukf(nonlinear, Q, R, ys, us, x0, P0)
-    smoothed_linear = cx.rts(sys, filtered_linear, Q_noise=Q)
-    smoothed_nonlinear = cx.uks(nonlinear, filtered_nonlinear, Q_noise=Q, us=us)
+    filtered_linear = cx.kalman(sys, ys, Q=Q, R=R, x0=x0, P0=P0)
+    filtered_nonlinear = cx.ukf(nonlinear, ys, Q=Q, R=R, us=us, x0=x0, P0=P0)
+    smoothed_linear = cx.rts(sys, filtered_linear, Q=Q)
+    smoothed_nonlinear = cx.uks(filtered_nonlinear)
 
-    assert jnp.allclose(
-        smoothed_nonlinear.x_smooth, smoothed_linear.x_smooth, atol=1e-9
-    )
-    assert jnp.allclose(
-        smoothed_nonlinear.P_smooth, smoothed_linear.P_smooth, atol=1e-9
-    )
+    assert jnp.allclose(smoothed_nonlinear.xs, smoothed_linear.xs, atol=1e-9)
+    assert jnp.allclose(smoothed_nonlinear.Ps, smoothed_linear.Ps, atol=1e-9)
 
 
 def test_ukf_matches_kalman_for_linear_system():
@@ -391,7 +373,7 @@ def test_ukf_matches_kalman_for_linear_system():
     x0 = jnp.array([0.0])
     P0 = jnp.array([[1.0]])
 
-    kf = cx.kalman(sys, Q, R, ys, x0=x0, P0=P0)
+    kf = cx.kalman(sys, ys, Q=Q, R=R, x0=x0, P0=P0)
 
     def f(t, x, u):
         return sys.A @ x + sys.B @ u
@@ -399,11 +381,11 @@ def test_ukf_matches_kalman_for_linear_system():
     def h(x):
         return sys.C @ x
 
-    ukf = cx.ukf(f, Q, R, ys, us, x0, P0, observation=h)
+    ukf = cx.ukf(f, ys, Q=Q, R=R, us=us, x0=x0, P0=P0, observation=h)
 
     assert isinstance(ukf, cx.UKFResult)
-    assert jnp.allclose(ukf.x_hat, kf.x_hat, atol=1e-9)
-    assert jnp.allclose(ukf.P, kf.P, atol=1e-9)
+    assert jnp.allclose(ukf.xs, kf.xs, atol=1e-9)
+    assert jnp.allclose(ukf.Ps, kf.Ps, atol=1e-9)
     assert jnp.allclose(ukf.innovations, kf.innovations, atol=1e-9)
 
 
@@ -422,29 +404,29 @@ def test_ukf_handles_nonlinear_observation():
     us = jnp.zeros((15, 1))
     result = cx.ukf(
         sys,
-        Q_noise=jnp.array([[1e-4]]),
-        R_noise=jnp.array([[1e-3]]),
-        ys=ys,
+        ys,
         us=us,
         x0=jnp.array([1.0]),
         P0=jnp.array([[0.5]]),
-        alpha=0.5,
+        Q=jnp.array([[0.0001]]),
+        R=jnp.array([[0.001]]),
+        solver=cx.solvers.UKF(alpha=0.5),
     )
 
-    assert result.x_hat.shape == (15, 1)
-    assert result.P.shape == (15, 1, 1)
+    assert result.xs.shape == (15, 1)
+    assert result.Ps.shape == (15, 1, 1)
     assert result.innovations.shape == (15, 1)
     assert result.predicted_measurements.shape == ys.shape
     assert result.innovation_covariances.shape == (15, 1, 1)
     assert result.log_likelihood_terms.shape == (15,)
-    assert result.predicted_state_means.shape == result.x_hat.shape
-    assert result.predicted_state_covariances.shape == result.P.shape
-    assert result.transition_cross_covariances.shape == result.P.shape
+    assert result.predicted_state_means.shape == result.xs.shape
+    assert result.predicted_state_covariances.shape == result.Ps.shape
+    assert result.transition_cross_covariances.shape == result.Ps.shape
     assert jnp.allclose(result.innovations, ys - result.predicted_measurements)
     assert jnp.all(jnp.isfinite(result.log_likelihood_terms))
     assert jnp.all(result.innovation_covariances[:, 0, 0] > 0.0)
-    assert jnp.all(jnp.isfinite(result.x_hat))
-    assert abs(float(result.x_hat[-1, 0]) - true_x) < 5e-2
+    assert jnp.all(jnp.isfinite(result.xs))
+    assert abs(float(result.xs[-1, 0]) - true_x) < 5e-2
 
 
 def test_sample_system_matches_known_zoh_scalar_decay():
@@ -511,17 +493,17 @@ def test_ekf_accepts_sampled_continuous_system():
 
     result = cx.ekf(
         sys_d,
-        Q_noise=jnp.array([[1e-3]]),
-        R_noise=jnp.array([[1e-2]]),
-        ys=ys,
+        ys,
         us=us,
         x0=jnp.array([0.0]),
         P0=jnp.array([[1.0]]),
+        Q=jnp.array([[0.001]]),
+        R=jnp.array([[0.01]]),
     )
 
-    assert result.x_hat.shape == (12, 1)
-    assert jnp.all(jnp.isfinite(result.x_hat))
-    assert jnp.all(jnp.isfinite(result.P))
+    assert result.xs.shape == (12, 1)
+    assert jnp.all(jnp.isfinite(result.xs))
+    assert jnp.all(jnp.isfinite(result.Ps))
 
 
 def test_ukf_accepts_sampled_phs_system():
@@ -535,17 +517,17 @@ def test_ukf_accepts_sampled_phs_system():
 
     result = cx.ukf(
         sys_d,
-        Q_noise=1e-4 * jnp.eye(2),
-        R_noise=1e-3 * jnp.eye(2),
-        ys=ys,
+        ys,
         us=us,
         x0=jnp.array([1.0, 0.0]),
         P0=0.1 * jnp.eye(2),
+        Q=0.0001 * jnp.eye(2),
+        R=0.001 * jnp.eye(2),
     )
 
-    assert result.x_hat.shape == (8, 2)
+    assert result.xs.shape == (8, 2)
     assert result.predicted_measurements.shape == (8, 2)
-    assert jnp.all(jnp.isfinite(result.x_hat))
+    assert jnp.all(jnp.isfinite(result.xs))
 
 
 def test_innovation_diagnostics_compute_nis_and_conditioning():
@@ -578,12 +560,12 @@ def test_ukf_diagnostics_wrap_common_ukf_summary():
     )
     result = cx.ukf(
         sys,
-        Q_noise=jnp.array([[1e-4]]),
-        R_noise=jnp.array([[1e-2]]),
-        ys=jnp.zeros((5, 1)),
+        jnp.zeros((5, 1)),
         us=jnp.zeros((5, 1)),
         x0=jnp.array([0.0]),
         P0=jnp.array([[0.1]]),
+        Q=jnp.array([[0.0001]]),
+        R=jnp.array([[0.01]]),
     )
 
     innovation_diag, likelihood_diag = cx.ukf_diagnostics(result)
@@ -601,8 +583,8 @@ def test_smoother_diagnostics_healthy_rts():
     R = jnp.array([[1e-2]])
     ys = jnp.linspace(0.0, 1.0, 20)[:, None]
 
-    filtered = cx.kalman(sys, Q, R, ys)
-    smoothed = cx.rts(sys, filtered, Q_noise=Q)
+    filtered = cx.kalman(sys, ys, Q=Q, R=R)
+    smoothed = cx.rts(sys, filtered, Q=Q)
     diag = cx.smoother_diagnostics(smoothed, filtered)
 
     assert isinstance(diag, cx.SmootherDiagnostics)
@@ -629,8 +611,10 @@ def test_smoother_diagnostics_healthy_uks():
     ys = jnp.linspace(0.0, 1.0, 15)[:, None]
     us = jnp.zeros((15, 1))
 
-    filtered = cx.ukf(sys, Q, R, ys, us, jnp.array([0.0]), jnp.array([[1.0]]))
-    smoothed = cx.uks(sys, filtered, Q_noise=Q, us=us)
+    filtered = cx.ukf(
+        sys, ys, Q=Q, R=R, us=us, x0=jnp.array([0.0]), P0=jnp.array([[1.0]])
+    )
+    smoothed = cx.uks(filtered)
     diag = cx.smoother_diagnostics(smoothed, filtered)
 
     assert float(diag.min_covariance_reduction) >= -1e-9
@@ -674,8 +658,8 @@ def test_mhe_matches_rts_smoother_linear_gaussian():
     x0 = jnp.zeros(1)
     P0 = jnp.eye(1)
 
-    filtered = cx.kalman(sys, Q_noise=Q, R_noise=R, ys=ys, x0=x0, P0=P0)
-    smoothed = cx.rts(sys, filtered, Q_noise=Q)
+    filtered = cx.kalman(sys, ys, x0=x0, P0=P0, Q=Q, R=R)
+    smoothed = cx.rts(sys, filtered, Q=Q)
 
     def f(x, u):
         return sys.A @ x
@@ -686,7 +670,7 @@ def test_mhe_matches_rts_smoother_linear_gaussian():
     result = cx.mhe(
         f,
         observation=h,
-        xs_init=filtered.x_hat,
+        xs_init=filtered.xs,
         us=jnp.zeros((T - 1, 1)),
         ys=ys,
         x_prior=x0,
@@ -696,7 +680,7 @@ def test_mhe_matches_rts_smoother_linear_gaussian():
     )
 
     assert bool(result.solver_converged)
-    assert jnp.allclose(result.xs, smoothed.x_smooth, atol=1e-4)
+    assert jnp.allclose(result.xs, smoothed.xs, atol=1e-4)
 
 
 def test_mhe_warm_start_shifts_window_and_repeats_terminal_state():
@@ -773,35 +757,51 @@ def test_positive_parameterizations_are_positive_and_jittable():
     assert jnp.allclose(L, jnp.array([[10.0, 0.0], [3.0, 20.0]]))
 
 
-def test_ukf_grad_through_noise_parameters_finite():
-    ys = jnp.linspace(0.5, 1.5, 25)[:, None]
-    us = jnp.zeros((25, 1))
+def test_ukf_likelihood_and_noise_gradients_match_joint_gaussian():
+    """Observed y0/y2 have covariance L diag(1,q,q) L.T + r I.
 
-    sys = cx.nonlinear_system(
-        lambda t, x, u: jnp.array([0.9 * x[0] + 0.1]),
-        observation=lambda t, x, u: jnp.array([x[0] ** 2]),
-        dt=1.0,
-        state_dim=1,
-        input_dim=1,
-        output_dim=1,
-    )
+    This joint-distribution oracle uses no filtering recursion. Missing y1
+    contributes neither likelihood nor a diagnostic failure.
+    """
+    sys = cx.dss([[0.9]], [[1.0]], [[1.0]], [[0.0]], 1.0)
+    ys = jnp.array([[0.5], [jnp.nan], [1.5]])
+    flags = jnp.array([True, False, True])
 
-    def loss(log_q, log_r):
-        Q = jnp.exp(log_q)[None, None]
-        R = jnp.exp(log_r)[None, None]
-        result = cx.ukf(
+    def filter_result(theta):
+        q, r = jnp.exp(theta)
+        return cx.ukf(
             sys,
-            Q,
-            R,
             ys,
-            us,
-            x0=jnp.array([1.0]),
-            P0=jnp.array([[0.5]]),
-            alpha=0.5,
+            Q=q * jnp.eye(1),
+            R=r * jnp.eye(1),
+            has_measurement=flags,
         )
-        return jnp.sum(result.innovations**2) + jnp.sum(result.P)
 
-    dlog_q, dlog_r = jax.grad(loss, argnums=(0, 1))(jnp.array(-5.0), jnp.array(-3.0))
+    def loss(theta):
+        return jnp.sum(filter_result(theta).log_likelihood_terms)
 
-    assert jnp.isfinite(dlog_q)
-    assert jnp.isfinite(dlog_r)
+    def oracle(theta):
+        q, r = jnp.exp(theta)
+        L = jnp.array([[1.0, 0.0, 0.0], [0.81, 0.9, 1.0]])
+        covariance = (L * jnp.array([1.0, q, q])) @ L.T + r * jnp.eye(2)
+        return jax.scipy.stats.multivariate_normal.logpdf(
+            ys[jnp.array([0, 2]), 0], jnp.zeros(2), covariance
+        )
+
+    theta = jnp.array([-3.0, -2.0])
+    assert jnp.allclose(jax.jit(loss)(theta), oracle(theta), atol=1e-10)
+    assert jnp.allclose(
+        jax.jit(jax.grad(loss))(theta), jax.grad(oracle)(theta), atol=1e-9
+    )
+    tangent = jnp.array([0.3, -0.2])
+    assert jnp.allclose(
+        jax.jvp(loss, (theta,), (tangent,))[1],
+        jax.jvp(oracle, (theta,), (tangent,))[1],
+        atol=1e-9,
+    )
+    result = filter_result(theta)
+    innovations, likelihood = cx.ukf_diagnostics(result)
+    assert not innovations.nonfinite and not likelihood.nonfinite
+    assert result.log_likelihood_terms[1] == 0
+    assert jnp.all(result.predicted_measurements[1] == 0)
+    assert jnp.allclose(likelihood.mean_log_likelihood, oracle(theta) / 2)

@@ -192,7 +192,7 @@ def mhe(
     `optx.LBFGS(rtol=1e-6, atol=1e-6)`, which is well-suited to the
     deterministic, smooth, fixed-horizon objectives that arise in MHE.
 
-    The optimised terminal state `x_hat = xs[-1]` is the natural input to a
+    The optimised terminal state `final_state = xs[-1]` is the natural input to a
     downstream controller or observer.  For a linear-Gaussian model, the
     full trajectory `xs` matches the RTS smoother output within solver
     tolerance.
@@ -350,7 +350,6 @@ def mhe(
     )
     result = MHEResult(
         xs=xs_opt,
-        x_hat=xs_opt[-1],
         final_cost=final_cost,
         solver_converged=converged,
         status=status,

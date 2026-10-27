@@ -33,6 +33,12 @@ compact form requires `covariance_update="compact"`. `EKF(num_iter=3)` enables
 iterated measurement linearization in online and batch estimators. Filtering
 preserves input precision and does not require float64 mode.
 
+`UKF(alpha=1, beta=2, kappa=0)` configures the scaled unscented transform.
+Sigma-point covariances and innovation covariances must be positive definite;
+no diagonal jitter is added. Missing observations skip the entire measurement
+transform and contribute zero log likelihood. The innovation Cholesky factor
+is reused for the gain and likelihood.
+
 ```python
 design = cx.lqr(sys, Q, R, solver=cx.solvers.DARE(max_steps=64))
 ```

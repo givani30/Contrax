@@ -14,17 +14,48 @@ from contrax.types import (
 )
 
 
+def _observations(values, has_measurement):
+    flags = (
+        jnp.ones(values.shape[0], dtype=bool)
+        if has_measurement is None
+        else jnp.asarray(has_measurement, dtype=bool)
+    )
+    if flags.shape != (values.shape[0],):
+        raise ValueError("has_measurement must match the sequence length")
+    return flags
+
+
+def _masked_summary(values, flags):
+    count = jnp.sum(flags)
+    mean = jnp.sum(jnp.where(flags, values, 0)) / jnp.maximum(count, 1)
+    minimum = jnp.min(jnp.where(flags, values, jnp.inf), initial=jnp.inf)
+    maximum = jnp.max(jnp.where(flags, values, -jnp.inf), initial=-jnp.inf)
+    return tuple(jnp.where(count > 0, v, jnp.nan) for v in (mean, minimum, maximum))
+
+
 def innovation_diagnostics(
     innovations: Array,
     innovation_covariances: Array,
+    *,
+    has_measurement: Array | None = None,
 ) -> InnovationDiagnostics:
     """Summarize innovation magnitude and covariance conditioning.
 
     The returned NIS values are the per-step normalized innovation squared
     terms `v_k^T S_k^{-1} v_k`. They are useful for routine filter health
     inspection, but Contrax does not present them as a formal standalone
-    consistency certificate.
+    consistency certificate. Optional whole-observation flags exclude missing
+    entries from summaries and covariance solves. Missing per-step values are
+    zero placeholders. With no observations, summaries are NaN and nonfinite
+    remains false: absence of data is not a numerical failure.
     """
+    flags = _observations(innovations, has_measurement)
+    innovations = jnp.where(flags[:, None], innovations, 0)
+    innovation_covariances = jnp.where(
+        flags[:, None, None],
+        innovation_covariances,
+        jnp.eye(innovations.shape[-1], dtype=innovations.dtype),
+    )
 
     def step_nis(innovation, covariance):
         solved = jnp.linalg.solve(covariance, innovation[:, None])
@@ -32,7 +63,12 @@ def innovation_diagnostics(
 
     nis = jax.vmap(step_nis)(innovations, innovation_covariances)
     innovation_norms = jnp.linalg.norm(innovations, axis=-1)
-    innovation_cov_condition_numbers = jax.vmap(jnp.linalg.cond)(innovation_covariances)
+    innovation_cov_condition_numbers = jnp.where(
+        flags, jax.vmap(jnp.linalg.cond)(innovation_covariances), 0
+    )
+    mean_nis, _, max_nis = _masked_summary(nis, flags)
+    mean_norm, _, max_norm = _masked_summary(innovation_norms, flags)
+    _, _, max_condition = _masked_summary(innovation_cov_condition_numbers, flags)
     all_values = (
         jnp.isfinite(nis)
         & jnp.isfinite(innovation_norms)
@@ -42,23 +78,34 @@ def innovation_diagnostics(
         nis=nis,
         innovation_norms=innovation_norms,
         innovation_cov_condition_numbers=innovation_cov_condition_numbers,
-        mean_nis=jnp.mean(nis),
-        max_nis=jnp.max(nis),
-        mean_innovation_norm=jnp.mean(innovation_norms),
-        max_innovation_norm=jnp.max(innovation_norms),
-        max_innovation_cov_condition_number=jnp.max(innovation_cov_condition_numbers),
+        mean_nis=mean_nis,
+        max_nis=max_nis,
+        mean_innovation_norm=mean_norm,
+        max_innovation_norm=max_norm,
+        max_innovation_cov_condition_number=max_condition,
         nonfinite=jnp.logical_not(jnp.all(all_values)),
     )
 
 
-def likelihood_diagnostics(log_likelihood_terms: Array) -> LikelihoodDiagnostics:
-    """Summarize per-step innovation-form log-likelihood terms."""
+def likelihood_diagnostics(
+    log_likelihood_terms: Array,
+    *,
+    has_measurement: Array | None = None,
+) -> LikelihoodDiagnostics:
+    """Summarize observed log likelihoods, excluding optional missing entries.
+
+    Missing terms are zero. With no observations, total is zero and mean/min/max
+    are NaN; nonfinite flags numerical failure only in observed entries.
+    """
+    flags = _observations(log_likelihood_terms, has_measurement)
+    log_likelihood_terms = jnp.where(flags, log_likelihood_terms, 0)
+    mean, minimum, maximum = _masked_summary(log_likelihood_terms, flags)
     return LikelihoodDiagnostics(
         log_likelihood_terms=log_likelihood_terms,
         total_log_likelihood=jnp.sum(log_likelihood_terms),
-        mean_log_likelihood=jnp.mean(log_likelihood_terms),
-        min_log_likelihood=jnp.min(log_likelihood_terms),
-        max_log_likelihood=jnp.max(log_likelihood_terms),
+        mean_log_likelihood=mean,
+        min_log_likelihood=minimum,
+        max_log_likelihood=maximum,
         nonfinite=jnp.logical_not(jnp.all(jnp.isfinite(log_likelihood_terms))),
     )
 
@@ -68,14 +115,25 @@ def ukf_diagnostics(
 ) -> tuple[InnovationDiagnostics, LikelihoodDiagnostics]:
     """Build the standard diagnostics pair for a UKF result."""
     return (
-        innovation_diagnostics(result.innovations, result.innovation_covariances),
-        likelihood_diagnostics(result.log_likelihood_terms),
+        innovation_diagnostics(
+            result.innovations,
+            result.innovation_covariances,
+            has_measurement=result.has_measurement,
+        ),
+        likelihood_diagnostics(
+            result.log_likelihood_terms,
+            has_measurement=result.has_measurement,
+        ),
     )
 
 
 def innovation_rms(result: KalmanResult | UKFResult) -> Array:
-    """Return the RMS innovation magnitude for a filtered result."""
-    return jnp.sqrt(jnp.mean(result.innovations**2))
+    """Return observed innovation RMS; NaN if there are no observed components."""
+    observed = jnp.where(result.has_measurement[:, None], result.innovations, 0)
+    count = jnp.sum(result.has_measurement) * result.innovations.shape[-1]
+    return jnp.where(
+        count > 0, jnp.sqrt(jnp.sum(observed**2) / jnp.maximum(count, 1)), jnp.nan
+    )
 
 
 def smoother_diagnostics(
@@ -105,15 +163,16 @@ def smoother_diagnostics(
         ...     jnp.array([[0.9]]), jnp.zeros((1, 1)),
         ...     jnp.array([[1.0]]), jnp.zeros((1, 1)), dt=1.0,
         ... )
-        >>> filtered = cx.kalman(sys, 1e-3 * jnp.eye(1), 1e-2 * jnp.eye(1),
-        ...                      jnp.zeros((10, 1)))
-        >>> smoothed = cx.rts(sys, filtered, Q_noise=1e-3 * jnp.eye(1))
+        >>> filtered = cx.kalman(
+        ...     sys, jnp.zeros((10, 1)), Q=1e-3 * jnp.eye(1), R=1e-2 * jnp.eye(1)
+        ... )
+        >>> smoothed = cx.rts(sys, filtered, Q=0.001 * jnp.eye(1))
         >>> diag = cx.smoother_diagnostics(smoothed, filtered)
     """
-    x_smooth = smoothed.x_smooth  # (T, n)
-    P_smooth = smoothed.P_smooth  # (T, n, n)
-    x_filt = filtered.x_hat  # (T, n)
-    P_filt = filtered.P  # (T, n, n)
+    x_smooth = smoothed.xs  # (T, n)
+    P_smooth = smoothed.Ps  # (T, n, n)
+    x_filt = filtered.xs  # (T, n)
+    P_filt = filtered.Ps  # (T, n, n)
 
     def _sym(M: Array) -> Array:
         return (M + M.T) / 2

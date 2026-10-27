@@ -32,12 +32,7 @@ sys = cx.dss(
     jnp.zeros((2, 1)),
     dt=0.1,
 )
-result = cx.kalman(
-    sys,
-    Q_noise=1e-3 * jnp.eye(2),
-    R_noise=1e-2 * jnp.eye(2),
-    ys=jnp.zeros((20, 2)),
-)
+result = cx.kalman(sys, jnp.zeros((20, 2)), Q=0.001 * jnp.eye(2), R=0.01 * jnp.eye(2))
 ```
 
 <figure class="contrax-figure">
@@ -55,9 +50,9 @@ result = cx.kalman(
 - `ys`: measurement sequence with shape `(T, p)`
 - `x0`: prior mean on `x_0`
 - `P0`: prior covariance on `x_0`
-- [`KalmanResult.x_hat`](types.md#contrax.types.KalmanResult.x_hat): filtered
+- [`KalmanResult.xs`](types.md#contrax.types.KalmanResult.xs): filtered
   state sequence with shape `(T, n)`
-- [`KalmanResult.P`](types.md#contrax.types.KalmanResult.P): filtered
+- [`KalmanResult.Ps`](types.md#contrax.types.KalmanResult.Ps): filtered
   covariance sequence with shape `(T, n, n)`
 - [`KalmanResult.innovations`](types.md#contrax.types.KalmanResult.innovations):
   measurement residual sequence with shape `(T, p)` for `kalman()` and `ekf()`
@@ -316,21 +311,28 @@ before applying a scalar penalty.
 
 ## One-Step Helper Signatures
 
-The one-step helpers follow the order: **model, state `(x, P)`, runtime data
-`(u/y)`, noise matrices `(Q/R)`**.
+All batch filters take `(model, ys, *, Q, R, us=None, x0=None, P0=None)`.
+Initial means default to zero and covariances to identity; both describe the
+prior at the first observation. Omitted controls are zero vectors using the
+model's input dimension. Set `input_dim` on controlled nonlinear models or
+provide `us`. Sampled FOH models accept `(T, 2, m)` endpoint pairs.
+
+The one-step helpers take `(model, x, P)` for predictions and
+`(model, x, P, y)` for updates and combined steps. Noise and controls are
+keyword-only, with the same `Q`, `R` and `u` names throughout.
 
 ```python
 # predict: advances state by one step
-x_pred, P_pred = cx.ekf_predict(model, x, P, u, Q_noise)
-x_pred, P_pred = cx.kalman_predict(sys, x, P, Q_noise, u=None)  # u optional
+x_pred, P_pred = cx.ekf_predict(model, x, P, u=u, Q=Q_noise)
+x_pred, P_pred = cx.kalman_predict(sys, x, P, Q=Q_noise, u=None)  # u optional
 
 # update: fuses a new measurement
-x, P, innov = cx.ekf_update(model, x_pred, P_pred, y, R_noise)
-x, P, innov = cx.kalman_update(sys, x_pred, P_pred, y, R_noise, u=None)
+x, P, innov = cx.ekf_update(model, x_pred, P_pred, y, R=R_noise)
+x, P, innov = cx.kalman_update(sys, x_pred, P_pred, y, R=R_noise, u=None)
 
 # combined predict-update step
-x, P, innov = cx.ekf_step(model, x, P, u, y, Q_noise, R_noise, observation=h)
-x, P, innov = cx.kalman_step(sys, x, P, y, Q_noise, R_noise, u=None)
+x, P, innov = cx.ekf_step(model, x, P, y, u=u, Q=Q_noise, R=R_noise)
+x, P, innov = cx.kalman_step(sys, x, P, y, Q=Q_noise, R=R_noise, u=None)
 ```
 
 `has_measurement=False` can be passed to all step helpers to skip the update
@@ -356,8 +358,8 @@ The intended public workflow is:
 ```python
 sys_c = cx.nonlinear_system(f_continuous, output=h, dt=None)
 sys_d = cx.sample_system(sys_c, dt=0.1)
-result = cx.ukf(sys_d, Q_noise, R_noise, ys, us, x0, P0)
-smoothed = cx.uks(sys_d, result, Q_noise, us)
+result = cx.ukf(sys_d, ys, Q=Q_noise, R=R_noise, us=us, x0=x0, P0=P0)
+smoothed = cx.uks(result)
 ```
 
 `ukf()` returns
@@ -366,6 +368,13 @@ smoothed = cx.uks(sys_d, result, Q_noise, us)
 exposes additional public intermediates: predicted measurements, innovation
 covariances, per-step likelihood terms, and the one-step prediction quantities
 used by `uks()`.
+
+The filter result retains `.has_measurement`. Missing observations have zero
+innovation, predicted measurement, innovation covariance and likelihood
+placeholders. `ukf_diagnostics` excludes them from solves and averages. The
+individual diagnostics functions also accept `has_measurement=`. With no
+observations, aggregate means and extrema are NaN, likelihood totals are zero,
+and missing data alone does not set `nonfinite`.
 
 For continuous dynamics with discrete observations, `sample_system()` is the
 main library bridge. It integrates the continuous vector field over one sample
@@ -390,7 +399,7 @@ The important transform contracts are:
 `kalman_gain()` is the estimator dual of discrete LQR and returns the
 measurement-update gain used by `kalman_update()`.
 
-`rts()` requires the same `Q_noise` used by the forward `kalman()` pass so the
+`rts()` requires the same `Q` used by the forward `kalman()` pass so the
 smoother uses the same process model. Pass zeros for deterministic dynamics.
 
 `mhe_objective()` is the lowest-level optimization-based estimator surface in

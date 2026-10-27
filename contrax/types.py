@@ -5,6 +5,12 @@ import jax.numpy as jnp
 from jax import Array
 
 
+def _final_state(xs: Array) -> Array:
+    if xs.shape[-2] == 0:
+        raise ValueError("An empty trajectory has no final_state")
+    return xs[..., -1, :]
+
+
 class LyapunovResult(eqx.Module):
     """Solution and diagnostics for a Lyapunov equation or LTI Gramian.
 
@@ -31,7 +37,10 @@ class SimResult(eqx.Module):
     """Result bundle for simulation functions.
 
     Attributes:
-        ts: Sample times. Shape: `(T,)` or `(N,)` for continuous.
+        ts: Output sample times, also exposed as output_times. Shape: `(T,)`
+            for discrete, `(N,)` for continuous.
+        state_times: Times aligned with xs. Shape: `(T+1,)` for discrete,
+            `(N,)` for continuous. Includes the terminal discrete state time.
         xs: State trajectory including the initial state. Shape: `(T+1, n)`
             for discrete, `(N, n)` for continuous.
         ys: Output trajectory. Shape: `(T, p)` or `(N, p)`.
@@ -39,6 +48,7 @@ class SimResult(eqx.Module):
         status: Backend failure code, or numerical_failure for nonfinite output.
         successful: Whether the backend and output finiteness checks succeeded.
         num_steps: State advances or adaptive integration steps performed.
+        final_state: Last state, shape `(n,)`; raises ValueError for empty xs.
 
     Supports tuple unpacking: ``ts, xs, ys = cx.simulate(...)``
     """
@@ -46,6 +56,7 @@ class SimResult(eqx.Module):
     ts: Array
     xs: Array
     ys: Array
+    state_times: Array
     solver_status: Array = eqx.field(default_factory=lambda: jnp.asarray(0))
     num_steps: Array = eqx.field(default_factory=lambda: jnp.asarray(0))
 
@@ -53,6 +64,7 @@ class SimResult(eqx.Module):
     def status(self) -> Array:
         finite = (
             jnp.all(jnp.isfinite(self.ts))
+            & jnp.all(jnp.isfinite(self.state_times))
             & jnp.all(jnp.isfinite(self.xs))
             & jnp.all(jnp.isfinite(self.ys))
         )
@@ -63,6 +75,14 @@ class SimResult(eqx.Module):
     @property
     def successful(self) -> Array:
         return self.status == 0
+
+    @property
+    def output_times(self) -> Array:
+        return self.ts
+
+    @property
+    def final_state(self) -> Array:
+        return _final_state(self.xs)
 
     def __iter__(self):
         return iter((self.ts, self.xs, self.ys))
@@ -141,23 +161,32 @@ class KalmanResult(eqx.Module):
     """Result bundle for Kalman filter and EKF passes.
 
     Attributes:
-        x_hat: Filtered state estimates over time. Shape: `(T, n)`.
-        P: Filtered covariance matrices over time. Shape: `(T, n, n)`.
+        xs: Filtered state estimates over time. Shape: `(T, n)`.
+        Ps: Filtered covariance matrices over time. Shape: `(T, n, n)`.
         innovations: Measurement residual sequence. Shape: `(T, p)`.
+        has_measurement: Availability mask. Shape: `(T,)`.
+        final_state: Last filtered state; raises ValueError for an empty pass.
     """
 
-    x_hat: Array
-    P: Array
+    xs: Array
+    Ps: Array
     innovations: Array
+    has_measurement: Array
+
+    @property
+    def final_state(self) -> Array:
+        return _final_state(self.xs)
 
 
 class UKFResult(eqx.Module):
     """Result bundle for unscented Kalman filtering.
 
     Attributes:
-        x_hat: Filtered state estimates over time. Shape: `(T, n)`.
-        P: Filtered covariance matrices over time. Shape: `(T, n, n)`.
+        xs: Filtered state estimates over time. Shape: `(T, n)`.
+        Ps: Filtered covariance matrices over time. Shape: `(T, n, n)`.
+        final_state: Last filtered state; raises ValueError for an empty pass.
         innovations: Measurement residual sequence. Shape: `(T, p)`.
+        has_measurement: Availability mask. Shape: `(T,)`.
         predicted_measurements: Predicted measurement means before each update.
             Shape: `(T, p)`.
         innovation_covariances: Innovation covariance matrices for each update.
@@ -172,15 +201,20 @@ class UKFResult(eqx.Module):
             states and one-step predictions. Shape: `(T, n, n)`.
     """
 
-    x_hat: Array
-    P: Array
+    xs: Array
+    Ps: Array
     innovations: Array
+    has_measurement: Array
     predicted_measurements: Array
     innovation_covariances: Array
     log_likelihood_terms: Array
     predicted_state_means: Array
     predicted_state_covariances: Array
     transition_cross_covariances: Array
+
+    @property
+    def final_state(self) -> Array:
+        return _final_state(self.xs)
 
 
 class KalmanGainResult(eqx.Module):
@@ -215,12 +249,17 @@ class RTSResult(eqx.Module):
     """Result bundle for Rauch-Tung-Striebel smoothing.
 
     Attributes:
-        x_smooth: Smoothed state estimates over time. Shape: `(T, n)`.
-        P_smooth: Smoothed covariance matrices over time. Shape: `(T, n, n)`.
+        xs: Smoothed state estimates over time. Shape: `(T, n)`.
+        Ps: Smoothed covariance matrices over time. Shape: `(T, n, n)`.
+        final_state: Last smoothed state; raises ValueError for an empty pass.
     """
 
-    x_smooth: Array
-    P_smooth: Array
+    xs: Array
+    Ps: Array
+
+    @property
+    def final_state(self) -> Array:
+        return _final_state(self.xs)
 
 
 class MHEResult(eqx.Module):
@@ -228,7 +267,7 @@ class MHEResult(eqx.Module):
 
     Attributes:
         xs: Estimated state trajectory over the window. Shape: `(N, n)`.
-        x_hat: Terminal state estimate, equal to `xs[-1]`. Shape: `(n,)`.
+        final_state: Terminal state estimate, equal to `xs[-1]`. Shape: `(n,)`.
             This is the estimate passed to downstream controllers or observers.
         final_cost: Final MHE objective value. Shape: scalar.
         solver_converged: Whether the underlying optimizer reported convergence.
@@ -242,13 +281,16 @@ class MHEResult(eqx.Module):
     """
 
     xs: Array
-    x_hat: Array
     final_cost: Array
     solver_converged: Array
     status: Array
     num_steps: Array
     gradient_norm: Array
     initial_cost: Array
+
+    @property
+    def final_state(self) -> Array:
+        return _final_state(self.xs)
 
     @property
     def successful(self) -> Array:

@@ -42,6 +42,15 @@ workflow design:
 
 Some fields are especially worth knowing about:
 
+Simulation, filtering, smoothing and MHE all expose the state trajectory as
+`.xs` and its last state as `.final_state`. Filtering and smoothing covariances
+are `.Ps`. A single covariance, such as `kalman_gain(...).P`, remains `.P`.
+An empty trajectory has no final state: accessing `.final_state` raises
+`ValueError`. Apply `vmap` to individual solves when working with batches.
+
+Simulation exposes `.state_times` aligned with `.xs` and `.output_times`
+aligned with `.ys`. `.ts` is the output-time vector used by tuple unpacking.
+
 `LQRResult.closed_loop` and `KalmanGainResult.closed_loop` retain the designed
 error/feedback transition matrices. Their `.poles` properties evaluate
 eigenvalues on access, so unused pole diagnostics do not restrict higher-order
@@ -57,7 +66,7 @@ eigenvalues are not provided by JAX.
   per-step innovation-form Gaussian log-likelihood terms
 - [`KalmanGainResult.K`](#contrax.types.KalmanGainResult.K): the steady-state
   measurement-update gain
-- [`MHEResult.x_hat`](#contrax.types.MHEResult.x_hat): the terminal state
+- [`MHEResult.final_state`](#contrax.types.MHEResult.final_state): the terminal state
   estimate from the optimized window
 - [`PHSStructureDiagnostics.power_balance_residual`](#contrax.types.PHSStructureDiagnostics.power_balance_residual):
   the local port-Hamiltonian power-balance residual

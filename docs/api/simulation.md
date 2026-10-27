@@ -55,6 +55,13 @@ with `.ts`, `.xs`, `.ys`, `.status`, `.successful` and `.num_steps` fields.
 
 For returned trajectories:
 
+Use `plot(result.state_times, result.xs)` for states and
+`plot(result.output_times, result.ys)` for outputs. Discrete simulations retain
+T outputs and T+1 states: `.state_times` includes the terminal time even when
+T is zero. `.ts` aliases output times for tuple unpacking. Continuous results
+use the same sample vector for states and outputs. `.final_state` returns the
+last state and raises `ValueError` when the trajectory is empty.
+
 - discrete `simulate()` returns `xs` including `x0`
 - continuous `simulate()` returns samples on a fixed save grid
 - `lsim()` returns a `SimResult` for an open-loop input sequence

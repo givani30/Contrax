@@ -39,7 +39,9 @@ R_NOISE = jnp.array([[3e-3]])
 MEASUREMENT_STD = jnp.sqrt(R_NOISE[0, 0])
 SAMPLE_TIMES = jnp.arange(NUM_STEPS + 1, dtype=jnp.float64) * DT
 INPUT_TIMES = SAMPLE_TIMES[:-1]
-INPUTS = (0.18 * jnp.sin(1.1 * INPUT_TIMES) + 0.08 * jnp.cos(0.55 * INPUT_TIMES))[:, None]
+INPUTS = (0.18 * jnp.sin(1.1 * INPUT_TIMES) + 0.08 * jnp.cos(0.55 * INPUT_TIMES))[
+    :, None
+]
 
 
 def hamiltonian(x):
@@ -68,6 +70,7 @@ def input_at_step(step):
 # Annotated workflow sections.
 # ---------------------------------------------------------------------------
 
+
 def _run_dgp(sys_disc: cx.NonlinearSystem) -> tuple:
     with jax.profiler.TraceAnnotation("DGP/simulate_truth"):
         _, xs, _ = cx.simulate(
@@ -87,22 +90,22 @@ def _run_ukf(sys_disc: cx.NonlinearSystem, ys) -> cx.UKFResult:
     with jax.profiler.TraceAnnotation("UKF/forward_pass"):
         result = cx.ukf(
             sys_disc,
-            Q_noise=Q_NOISE,
-            R_noise=R_NOISE,
-            ys=ys,
+            ys,
             us=INPUTS,
             x0=X0_EST,
             P0=P0,
-            alpha=0.5,
+            Q=Q_NOISE,
+            R=R_NOISE,
+            solver=cx.solvers.UKF(alpha=0.5),
         )
-        jax.block_until_ready(result.x_hat)
+        jax.block_until_ready(result.xs)
     return result
 
 
 def _run_uks(sys_disc: cx.NonlinearSystem, filtered) -> cx.RTSResult:
     with jax.profiler.TraceAnnotation("UKS/backward_smoothing"):
-        result = cx.uks(sys_disc, filtered, Q_noise=Q_NOISE, us=INPUTS, alpha=0.5)
-        jax.block_until_ready(result.x_smooth)
+        result = cx.uks(filtered)
+        jax.block_until_ready(result.xs)
     return result
 
 
@@ -116,6 +119,7 @@ def _run_phs_diagnostics() -> cx.PHSStructureDiagnostics:
 # ---------------------------------------------------------------------------
 # Full timed pass for one backend.
 # ---------------------------------------------------------------------------
+
 
 def _timed_pass(sys_disc: cx.NonlinearSystem, label: str) -> dict:
     timings: dict = {"label": label}
@@ -142,8 +146,8 @@ def _timed_pass(sys_disc: cx.NonlinearSystem, label: str) -> dict:
     timings["mean_nis"] = float(innovation_diag.mean_nis)
     timings["log_likelihood"] = float(likelihood_diag.total_log_likelihood)
 
-    filtered_rmse = float(jnp.sqrt(jnp.mean((filtered.x_hat[:, 0] - x_true[:, 0]) ** 2)))
-    smoothed_rmse = float(jnp.sqrt(jnp.mean((smoothed.x_smooth[:, 0] - x_true[:, 0]) ** 2)))
+    filtered_rmse = float(jnp.sqrt(jnp.mean((filtered.xs[:, 0] - x_true[:, 0]) ** 2)))
+    smoothed_rmse = float(jnp.sqrt(jnp.mean((smoothed.xs[:, 0] - x_true[:, 0]) ** 2)))
     timings["filtered_q_rmse"] = filtered_rmse
     timings["smoothed_q_rmse"] = smoothed_rmse
 

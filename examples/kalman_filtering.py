@@ -43,27 +43,20 @@ P0 = jnp.eye(2)
 
 # --8<-- [start:filter-and-smooth]
 def run_example():
-    filtered = cx.kalman(
-        SYS,
-        Q_noise=Q_NOISE,
-        R_noise=R_NOISE,
-        ys=YS,
-        x0=X0,
-        P0=P0,
-    )
-    smoothed = cx.rts(SYS, filtered, Q_noise=Q_NOISE)
+    filtered = cx.kalman(SYS, YS, x0=X0, P0=P0, Q=Q_NOISE, R=R_NOISE)
+    smoothed = cx.rts(SYS, filtered, Q=Q_NOISE)
 
     final_measurement = float(YS[-1, 0])
-    final_filtered = float(filtered.x_hat[-1, 0])
-    final_smoothed = float(smoothed.x_smooth[-1, 0])
+    final_filtered = float(filtered.xs[-1, 0])
+    final_smoothed = float(smoothed.xs[-1, 0])
     midpoint_index = 4
-    midpoint_filtered = float(filtered.x_hat[midpoint_index, 0])
-    midpoint_smoothed = float(smoothed.x_smooth[midpoint_index, 0])
+    midpoint_filtered = float(filtered.xs[midpoint_index, 0])
+    midpoint_smoothed = float(smoothed.xs[midpoint_index, 0])
     innovation_norm = float(jnp.linalg.norm(filtered.innovations))
 
-    assert filtered.x_hat.shape == (10, 2)
-    assert filtered.P.shape == (10, 2, 2)
-    assert smoothed.x_smooth.shape == (10, 2)
+    assert filtered.xs.shape == (10, 2)
+    assert filtered.Ps.shape == (10, 2, 2)
+    assert smoothed.xs.shape == (10, 2)
     assert abs(final_filtered - final_measurement) < 0.1
     assert innovation_norm < 1.5
 
@@ -73,9 +66,9 @@ def run_example():
         "final_smoothed_position": final_smoothed,
         "midpoint_filtered_position": midpoint_filtered,
         "midpoint_smoothed_position": midpoint_smoothed,
-        "final_velocity": float(filtered.x_hat[-1, 1]),
+        "final_velocity": float(filtered.xs[-1, 1]),
         "innovation_norm": innovation_norm,
-        "filtered_cov_trace": float(jnp.trace(filtered.P[-1])),
+        "filtered_cov_trace": float(jnp.trace(filtered.Ps[-1])),
     }
 
 

@@ -34,6 +34,7 @@ class NonlinearSystem(eqx.Module):
     input_dim: int | None = eqx.field(static=True, default=None)
     output_dim: int | None = eqx.field(static=True, default=None)
     _step_fn: Callable | None = None
+    _input_shape: tuple[int, ...] | None = eqx.field(static=True, default=None)
 
     def output(self, t: Array | float, x: Array, u: Array) -> Array:
         """Evaluate the observation map, defaulting to the full state."""
@@ -113,8 +114,8 @@ def nonlinear_system(
         state_dim: Optional static state dimension hint. Contrax does not
             require this — dimensions are inferred from the matrices passed to
             `lqr`, `ekf`, etc. Useful only as documentation metadata.
-        input_dim: Optional static input dimension hint. Same caveat as
-            `state_dim`.
+        input_dim: Optional static input dimension. Enables omitted zero controls
+            in recursive estimators; otherwise provide us for controlled models.
         output_dim: Optional static output dimension hint. Same caveat as
             `state_dim`.
 
@@ -140,7 +141,9 @@ def _is_system_model(obj: object) -> bool:
     """Return whether an object implements the Contrax system contract."""
     dynamics = getattr(obj, "dynamics", None)
     output = getattr(obj, "output", None)
-    return callable(dynamics) and callable(output)
+    return (callable(dynamics) and callable(output)) or all(
+        hasattr(obj, name) for name in ("A", "B", "C", "D")
+    )
 
 
 def _system_dt(sys: object) -> Array | None:
@@ -157,7 +160,9 @@ def _coerce_dynamics(
             raise ValueError(
                 "Recursive estimators require a discrete model; use sample_system first"
             )
-        return model_or_f.dynamics  # already (t, x, u)
+        if hasattr(model_or_f, "A"):
+            return lambda t, x, u: model_or_f.A @ x + model_or_f.B @ u
+        return model_or_f.dynamics
     return model_or_f  # must be (t, x, u)
 
 
@@ -167,6 +172,8 @@ def _coerce_observation(
 ) -> Callable[[Array | float, Array, Array], Array]:
     """Return a `(t, x, u) → y` callable from a system model or plain h(x)."""
     if _is_system_model(model_or_h):
+        if hasattr(model_or_h, "C"):
+            return lambda t, x, u: model_or_h.C @ x + model_or_h.D @ u
         return model_or_h.output  # already (t, x, u)
     if h is None:
         raise ValueError(

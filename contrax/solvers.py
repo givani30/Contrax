@@ -61,7 +61,7 @@ class Lyapunov(eqx.Module):
             raise ValueError("dense_limit must be a nonnegative integer")
 
 
-__all__ = ["Lyapunov", "DARE", "CARE", "Kalman", "EKF", "SolverStatus"]
+__all__ = ["Lyapunov", "DARE", "CARE", "Kalman", "EKF", "UKF", "SolverStatus"]
 
 
 class DARE(eqx.Module):
@@ -133,3 +133,26 @@ class EKF(eqx.Module):
         Kalman(covariance_update=self.covariance_update)
         if not isinstance(self.num_iter, int) or self.num_iter < 1:
             raise ValueError("num_iter must be a positive integer")
+
+
+class UKF(eqx.Module):
+    """Scaled unscented transform for additive-noise filtering.
+
+    Attributes:
+        alpha: Positive sigma-point spread; defaults to 1.
+        beta: Prior-distribution correction; 2 is standard for Gaussian priors.
+        kappa: Secondary scaling; n+kappa must be positive for n states.
+
+    Sigma-point covariances and innovation covariances must be positive definite.
+    The filter adds no diagonal jitter or other covariance repair.
+    """
+
+    alpha: float = eqx.field(static=True, default=1.0)
+    beta: float = eqx.field(static=True, default=2.0)
+    kappa: float = eqx.field(static=True, default=0.0)
+
+    def __check_init__(self):
+        if not all(math.isfinite(a) for a in (self.alpha, self.beta, self.kappa)):
+            raise ValueError("UKF scaling parameters must be finite")
+        if self.alpha <= 0:
+            raise ValueError("UKF alpha must be positive")

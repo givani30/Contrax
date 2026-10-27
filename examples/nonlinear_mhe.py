@@ -136,12 +136,12 @@ def run_example():
     result = run_mhe(xs_phys, ys, us)
 
     # Extract estimated damping from terminal augmented state
-    b_raw_est = float(result.x_hat[2])
+    b_raw_est = float(result.final_state[2])
     b_est = float(cx.positive_softplus(jnp.array(b_raw_est)))
 
     # True state at end of window for comparison
     true_angle = float(xs_phys[WINDOW, 0])
-    est_angle = float(result.x_hat[0])
+    est_angle = float(result.final_state[0])
 
     # positive_softplus guarantees b > 0 regardless of convergence
     assert b_est > 0, "estimated damping must be positive"
