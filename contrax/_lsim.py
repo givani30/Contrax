@@ -15,6 +15,8 @@ def continuous_lsim(sys, us, x0, ts, interpolation, throw):
     if interpolation not in ("zoh", "foh"):
         raise ValueError("input_interpolation must be zoh or foh")
     ts = jnp.asarray(ts)
+    if jnp.iscomplexobj(ts):
+        raise ValueError("ts must be a real sample-time vector")
     if ts.ndim != 1 or us.ndim != 2 or us.shape != (ts.shape[0], sys.B.shape[1]):
         raise ValueError("ts and us must have shapes (N,) and (N, m)")
     dtype = jnp.result_type(sys.A, sys.B, us, x0)
@@ -31,6 +33,8 @@ def continuous_lsim(sys, us, x0, ts, interpolation, throw):
         )
 
     def step(x, inputs):
+        if n == 0:
+            return x, x
         h, u0, u1 = inputs
         h = h.astype(dtype)
         if interpolation == "zoh":

@@ -8,6 +8,7 @@ import jax.numpy as jnp
 from jax import Array
 
 from contrax._integration import _diffrax_status
+from contrax._model_validation import sample_period
 from contrax.nonlinear import NonlinearSystem
 from contrax.phs import PHSSystem
 from contrax.types import SampleResult
@@ -270,12 +271,10 @@ def sample_system(
     if not isinstance(n_substeps, int) or n_substeps < 1:
         raise ValueError(f"n_substeps must be >= 1, got {n_substeps}.")
 
-    dt_arr = jnp.asarray(dt, dtype=float)
-    if dt_arr.ndim != 0:
-        raise ValueError("sample_system dt must be scalar")
+    dt_arr, invalid_period = sample_period(dt)
     dt_arr = eqx.error_if(
         dt_arr,
-        ~jnp.isfinite(dt_arr) | (dt_arr <= 0),
+        invalid_period,
         "sample_system requires finite dt > 0",
     )
     if not isinstance(max_steps, int) or max_steps < 0:

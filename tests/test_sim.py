@@ -215,6 +215,22 @@ def test_simulate_discrete_nonlinear_system_shapes():
     assert xs.shape == (6, 1)
     assert ys.shape == (5, 1)
     assert jnp.all(jnp.isfinite(xs))
+    for constructor in (
+        lambda **kw: cx.nonlinear_system(lambda t, x, u: x, **kw),
+        lambda **kw: cx.phs_system(lambda x: x @ x, **kw),
+    ):
+        for invalid_period in (-1, 0, jnp.nan, jnp.inf, True, [0.1], 0.1j):
+            with pytest.raises(ValueError, match="dt"):
+                constructor(dt=invalid_period)
+        for invalid_dim in (-1, 1.5, True):
+            with pytest.raises(ValueError, match="static integer"):
+                constructor(input_dim=invalid_dim)
+        with pytest.raises(Exception, match="dt must be finite and positive"):
+            jax.jit(lambda dt: constructor(dt=dt).dt)(-1.0)
+    continuous = cx.nonlinear_system(lambda t, x, u: -x)
+    for invalid_period in (True, -1, [0.1], 0.1j):
+        with pytest.raises(ValueError, match="dt"):
+            cx.sample_system(continuous, invalid_period, method="rk4")
 
 
 def test_simulate_phs_system_conserves_energy_when_undamped_and_unforced():
@@ -283,6 +299,8 @@ def test_partition_state_splits_structured_state_blocks():
     assert jnp.allclose(q, jnp.array([1.0, 2.0]))
     assert jnp.allclose(p, jnp.array([3.0]))
     assert jnp.allclose(z, jnp.array([4.0, 5.0]))
+    with pytest.raises(ValueError, match="static integer"):
+        cx.partition_state(x, (2.5, 1, 2))
 
 
 def test_block_observation_selects_partial_state_blocks():
@@ -290,6 +308,10 @@ def test_block_observation_selects_partial_state_blocks():
     y = observe(0.0, jnp.array([1.0, 2.0, 3.0, 4.0, 5.0]), jnp.zeros(1))
 
     assert jnp.allclose(y, jnp.array([1.0, 2.0, 4.0, 5.0]))
+    with pytest.raises(ValueError, match="static integer"):
+        cx.block_observation((2, 0), (0,))
+    with pytest.raises(ValueError, match="static integer"):
+        cx.block_observation((2, 1), (0.5,))
 
 
 def test_block_matrix_builds_structured_input_map():
@@ -310,6 +332,8 @@ def test_block_matrix_builds_structured_input_map():
         ]
     )
     assert jnp.allclose(G, expected)
+    with pytest.raises(ValueError, match="outside"):
+        cx.block_matrix((1,), (1,), {(1, 0): jnp.ones((1, 1))})
 
 
 def test_symmetrize_and_project_psd_clean_small_matrix_drift():
@@ -321,6 +345,10 @@ def test_symmetrize_and_project_psd_clean_small_matrix_drift():
     assert jnp.allclose(sym, sym.T, atol=1e-12)
     assert jnp.allclose(psd, psd.T, atol=1e-12)
     assert jnp.min(jnp.linalg.eigvalsh(psd)) >= -1e-8
+    with pytest.raises(ValueError, match="nonnegative"):
+        cx.project_psd(M, min_eigenvalue=-1)
+    with pytest.raises(ValueError, match="real"):
+        cx.project_psd(M.astype(complex))
 
 
 def test_phs_diagnostics_report_power_balance_and_structure_errors():
@@ -472,12 +500,14 @@ def test_vmap_linearize_c2d_lqr_over_operating_points():
 # sample_system fixed-step methods
 # ---------------------------------------------------------------------------
 
+
 def _make_oscillator_phs():
     """Undamped unit harmonic oscillator as a PHS.
 
     H(q,p) = 0.5*(q^2 + p^2). Exact solution from [q0,p0]=[1,0]:
         q(t) = cos(t),  p(t) = -sin(t).
     """
+
     def H(x):
         return 0.5 * (x[0] ** 2 + x[1] ** 2)
 
@@ -535,7 +565,9 @@ def test_sample_system_rk4_n_substeps_improves_accuracy():
     exact_q = jnp.cos(ts_exact)
     err_1 = float(jnp.max(jnp.abs(xs_1[:, 0] - exact_q)))
     err_4 = float(jnp.max(jnp.abs(xs_4[:, 0] - exact_q)))
-    assert err_4 < err_1, f"n_substeps=4 error {err_4:.2e} not smaller than n_substeps=1 {err_1:.2e}"
+    assert err_4 < err_1, (
+        f"n_substeps=4 error {err_4:.2e} not smaller than n_substeps=1 {err_1:.2e}"
+    )
 
 
 def test_sample_system_rejects_unknown_method():
@@ -546,6 +578,7 @@ def test_sample_system_rejects_unknown_method():
 
 def test_sample_system_rejects_solver_with_fixed_step():
     import diffrax
+
     sys = _make_oscillator_phs()
     with pytest.raises(ValueError, match="Diffrax-only"):
         cx.sample_system(sys, 0.1, method="rk4", solver=diffrax.Euler())
@@ -568,8 +601,13 @@ def test_sample_system_rk4_ukf_shapes():
     us = jnp.zeros((T, 1))
 
     result = cx.ukf(
-        sys_d, ys, us=us, x0=x0, P0=0.1 * jnp.eye(2),
-        Q=1e-4 * jnp.eye(2), R=1e-3 * jnp.eye(2),
+        sys_d,
+        ys,
+        us=us,
+        x0=x0,
+        P0=0.1 * jnp.eye(2),
+        Q=1e-4 * jnp.eye(2),
+        R=1e-3 * jnp.eye(2),
     )
     assert result.xs.shape == (T, 2)
     assert jnp.all(jnp.isfinite(result.xs))
@@ -579,9 +617,14 @@ def test_sample_system_rk4_ukf_shapes():
 # SeparablePHSSystem
 # ---------------------------------------------------------------------------
 
+
 def _make_separable_oscillator():
-    def V(q): return 0.5 * jnp.dot(q, q)
-    def T(p): return 0.5 * jnp.dot(p, p)
+    def V(q):
+        return 0.5 * jnp.dot(q, q)
+
+    def T(p):
+        return 0.5 * jnp.dot(p, p)
+
     return cx.separable_phs_system(V, T, n_dofs=1, input_dim=1, output_dim=2)
 
 
@@ -598,15 +641,28 @@ def test_separable_phs_properties():
 
 
 def test_separable_phs_rejects_invalid_n_dofs():
-    def V(q): return 0.5 * jnp.dot(q, q)
-    def T(p): return 0.5 * jnp.dot(p, p)
+    def V(q):
+        return 0.5 * jnp.dot(q, q)
+
+    def T(p):
+        return 0.5 * jnp.dot(p, p)
+
     with pytest.raises(ValueError, match="n_dofs"):
         cx.separable_phs_system(V, T, n_dofs=0)
+    with pytest.raises(ValueError, match="n_dofs"):
+        cx.separable_phs_system(V, T, n_dofs=1.5)
+    with pytest.raises(ValueError, match="n_dofs"):
+        cx.canonical_J(True)
+    with pytest.raises(ValueError, match="positive even"):
+        cx.phs_system(lambda x: x @ x, state_dim=3)
 
 
 def test_separable_phs_direct_construction_rejects_missing_v_t():
     """Direct construction without V/T should fail via __check_init__."""
-    def H(x): return 0.5 * jnp.dot(x, x)
+
+    def H(x):
+        return 0.5 * jnp.dot(x, x)
+
     with pytest.raises(Exception):
         cx.SeparablePHSSystem(H=H, n_dofs=1, state_dim=2)
 
@@ -615,9 +671,14 @@ def test_separable_phs_direct_construction_rejects_missing_v_t():
 # sample_system method="sv" (Störmer-Verlet)
 # ---------------------------------------------------------------------------
 
+
 def _make_separable_oscillator_sys():
-    def V(q): return 0.5 * jnp.dot(q, q)
-    def T(p): return 0.5 * jnp.dot(p, p)
+    def V(q):
+        return 0.5 * jnp.dot(q, q)
+
+    def T(p):
+        return 0.5 * jnp.dot(p, p)
+
     return cx.separable_phs_system(V, T, n_dofs=1, input_dim=1, output_dim=2)
 
 
@@ -632,9 +693,7 @@ def test_sv_conserves_energy_conservative():
     sys = _make_separable_oscillator_sys()
     sys_d = cx.sample_system(sys, 0.1, method="sv")
     x0 = jnp.array([1.0, 0.0])
-    ts, xs, ys = cx.simulate(
-        sys_d, x0, lambda t, x: jnp.zeros(1), num_steps=200
-    )
+    ts, xs, ys = cx.simulate(sys_d, x0, lambda t, x: jnp.zeros(1), num_steps=200)
 
     assert ts.shape == (200,)
     assert xs.shape == (201, 2)
@@ -642,7 +701,9 @@ def test_sv_conserves_energy_conservative():
     energies = jax.vmap(sys.H)(xs)
     # Energy should be bounded (not drift), characteristic of symplectic methods.
     energy_range = float(jnp.max(energies) - jnp.min(energies))
-    assert energy_range < 2e-2, f"Energy range {energy_range:.4f} suggests non-symplectic drift"
+    assert energy_range < 2e-2, (
+        f"Energy range {energy_range:.4f} suggests non-symplectic drift"
+    )
 
 
 def test_sv_bounded_drift_vs_euler_nonlinear():
@@ -654,8 +715,13 @@ def test_sv_bounded_drift_vs_euler_nonlinear():
     because for a linear oscillator at small dt its O(dt^4) per-step error
     is too small to distinguish from SV at moderate step counts.
     """
-    def V(q): return 1.0 - jnp.cos(q[0]) + 0.5 * q[0] ** 2
-    def T(p): return 0.5 * p[0] ** 2
+
+    def V(q):
+        return 1.0 - jnp.cos(q[0]) + 0.5 * q[0] ** 2
+
+    def T(p):
+        return 0.5 * p[0] ** 2
+
     sys = cx.separable_phs_system(V, T, n_dofs=1, input_dim=0, output_dim=2)
     sys_sv = cx.sample_system(sys, 0.2, method="sv")
     sys_euler = cx.sample_system(sys, 0.2, method="euler")
@@ -673,7 +739,8 @@ def test_sv_bounded_drift_vs_euler_nonlinear():
     sv_max_drift = float(jnp.max(jnp.abs(e_sv - e_sv[0])))
 
     assert euler_final_drift > sv_max_drift, (
-        f"Euler final drift {euler_final_drift:.4f} not larger than SV max drift {sv_max_drift:.4f}"
+        f"Euler final drift {euler_final_drift:.4f} not larger than "
+        f"SV max drift {sv_max_drift:.4f}"
     )
 
 
@@ -753,7 +820,9 @@ def test_sv_rejects_nonlinear_system():
     sys = cx.nonlinear_system(
         lambda t, x, u: jnp.array([-x[0]]),
         observation=lambda t, x, u: x,
-        state_dim=1, input_dim=1, output_dim=1,
+        state_dim=1,
+        input_dim=1,
+        output_dim=1,
     )
     with pytest.raises(ValueError, match="SeparablePHSSystem"):
         cx.sample_system(sys, 0.1, method="sv")

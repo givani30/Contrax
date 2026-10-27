@@ -6,6 +6,15 @@ become floating arrays. `dss` stores its scalar sample time in the resulting
 real matrix dtype. Inconsistent matrix shapes raise `ValueError` immediately,
 including during tracing.
 
+Nonlinear and PHS constructors also require finite positive real scalar sample
+periods when `dt` is supplied. Dimension metadata must be nonnegative static
+integers. The default canonical PHS structure requires a positive even state
+dimension; separable models require a positive integer number of coordinates.
+Block sizes and indices are static integers, and block-matrix entries outside
+the declared grid raise an error. `project_psd` explicitly projects real square
+matrices with a finite nonnegative eigenvalue floor; it supports JAX transforms
+where the eigendecomposition is differentiable.
+
 Discrete `NonlinearSystem` objects expose `step(t, x, u)` for a terminal state
 and numerical diagnostics. Models made by `sample_system` retain their adaptive
 integration status in that result. Recursive estimators require discrete

@@ -8,6 +8,7 @@ import jax.numpy as jnp
 from jax import Array
 from jax.typing import ArrayLike
 
+from contrax._model_validation import sample_period as _period
 from contrax._precision import require_x64
 from contrax.nonlinear import (
     DynamicsLike,
@@ -77,17 +78,6 @@ def _lti_arrays(A, B, C, D):
     if D.shape != (C.shape[0], B.shape[1]):
         raise ValueError("D must have shape (number of outputs, number of inputs)")
     return A, B, C, D
-
-
-def _period(dt, dtype):
-    raw = jnp.asarray(dt)
-    if raw.ndim != 0 or jnp.iscomplexobj(raw) or jnp.issubdtype(raw.dtype, jnp.bool_):
-        raise ValueError("dt must be a real scalar")
-    dt = jnp.asarray(dt, dtype=dtype)
-    invalid = ~jnp.isfinite(dt) | (dt <= 0)
-    if not isinstance(invalid, jax.core.Tracer) and bool(invalid):
-        raise ValueError("dt must be finite and positive")
-    return dt, invalid
 
 
 def ss(A: ArrayLike, B: ArrayLike, C: ArrayLike, D: ArrayLike) -> ContLTI:

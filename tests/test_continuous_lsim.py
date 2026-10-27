@@ -79,3 +79,14 @@ def test_shortest_empty_grid_and_compiled_invalid_grid_status():
     assert result.status == cx.solvers.SolverStatus.invalid_problem
     with pytest.raises(ValueError, match="explicit ts"):
         cx.lsim(sys, jnp.ones((2, 1)))
+    with pytest.raises(ValueError, match="real"):
+        cx.lsim(sys, jnp.ones((2, 1)), ts=jnp.array([0j, 1j]))
+    for m, hold in ((0, "foh"), (1, "zoh")):
+        static = cx.ss(
+            jnp.empty((0, 0)), jnp.empty((0, m)), jnp.empty((1, 0)), jnp.ones((1, m))
+        )
+        response = cx.lsim(
+            static, jnp.ones((2, m)), ts=jnp.array([0.0, 0.5]), input_interpolation=hold
+        )
+        assert response.successful and response.xs.shape == (2, 0)
+        np.testing.assert_allclose(response.ys, m * jnp.ones((2, 1)))

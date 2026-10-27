@@ -9,6 +9,7 @@ import jax.numpy as jnp
 from jax import Array
 from jax.typing import ArrayLike
 
+from contrax._model_validation import dimension, sample_period
 from contrax.types import SampleResult
 
 
@@ -106,8 +107,9 @@ def nonlinear_system(
             When omitted, the full state is used as the output.
         observation: Deprecated synonym for `output`. Pass only one of
             `output` or `observation`.
-        dt: Optional discrete sample time. Omit for continuous models.
-        state_dim: Optional static state dimension hint for documentation.
+        dt: Optional finite positive real scalar sample time. Omit for
+            continuous models.
+        state_dim: Optional nonnegative static integer state dimension.
         input_dim: Optional static input dimension. Enables omitted zero controls
             in recursive estimators; otherwise provide us for controlled models.
         output_dim: Optional static output dimension hint. Same caveat as
@@ -120,14 +122,19 @@ def nonlinear_system(
     if output is not None and observation is not None:
         raise ValueError("Pass only one of output= or observation=.")
     observation = output if output is not None else observation
-    dt_arr = None if dt is None else jnp.asarray(dt, dtype=float)
-    return NonlinearSystem(
+    dt_arr, invalid = (None, False) if dt is None else sample_period(dt)
+    result = NonlinearSystem(
         dynamics=dynamics,
         observation=observation,
         dt=dt_arr,
-        state_dim=state_dim,
-        input_dim=input_dim,
-        output_dim=output_dim,
+        state_dim=dimension(state_dim, "state_dim"),
+        input_dim=dimension(input_dim, "input_dim"),
+        output_dim=dimension(output_dim, "output_dim"),
+    )
+    return (
+        result
+        if dt is None
+        else eqx.error_if(result, invalid, "dt must be finite and positive")
     )
 
 

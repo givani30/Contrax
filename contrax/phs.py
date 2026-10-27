@@ -11,14 +11,17 @@ import jax.numpy as jnp
 from jax import Array
 from jax.typing import ArrayLike
 
+from contrax._model_validation import dimension, sample_period
 from contrax.core import ContLTI
 from contrax.nonlinear import NonlinearSystem
+from contrax.parameterization import _positive_inputs
 from contrax.types import PHSStructureDiagnostics
 
 
 def canonical_J(n_dofs: int, *, dtype: jnp.dtype | None = None) -> Array:
-    """Construct the canonical skew-symmetric PHS structure matrix."""
-    if n_dofs < 1:
+    """Construct the (2n, 2n) canonical structure for a positive static integer n."""
+    n_dofs = dimension(n_dofs, "n_dofs", minimum=1)
+    if n_dofs is None:
         raise ValueError("n_dofs must be positive.")
     dtype = jnp.float32 if dtype is None else dtype
     eye = jnp.eye(n_dofs, dtype=dtype)
@@ -162,7 +165,8 @@ def separable_phs_system(
         >>> isinstance(sys, cx.PHSSystem)
         True
     """
-    if n_dofs < 1:
+    n_dofs = dimension(n_dofs, "n_dofs", minimum=1)
+    if n_dofs is None:
         raise ValueError(f"n_dofs must be >= 1, got {n_dofs}.")
 
     def H(x: Array) -> Array:
@@ -180,8 +184,8 @@ def separable_phs_system(
         observation=output,
         dt=None,
         state_dim=2 * n_dofs,
-        input_dim=input_dim,
-        output_dim=output_dim,
+        input_dim=dimension(input_dim, "input_dim"),
+        output_dim=dimension(output_dim, "output_dim"),
     )
 
 
@@ -208,10 +212,10 @@ def phs_system(
         output: Optional output/measurement map with signature `(t, x, u)`.
         observation: Deprecated synonym for `output`. Pass only one of
             `output` or `observation`.
-        dt: Optional discrete sample time.
-        state_dim: Optional static state dimension metadata.
-        input_dim: Optional static input dimension metadata.
-        output_dim: Optional static output dimension metadata.
+        dt: Optional finite positive real scalar sample time.
+        state_dim: Optional nonnegative static integer; positive even for default J.
+        input_dim: Optional nonnegative static integer input dimension.
+        output_dim: Optional nonnegative static integer output dimension.
 
     Returns:
         [PHSSystem][contrax.systems.PHSSystem]: A reusable port-Hamiltonian
@@ -220,8 +224,11 @@ def phs_system(
     if output is not None and observation is not None:
         raise ValueError("Pass only one of output= or observation=.")
     observation = output if output is not None else observation
-    dt_arr = None if dt is None else jnp.asarray(dt, dtype=float)
-    return PHSSystem(
+    dt_arr, invalid = (None, False) if dt is None else sample_period(dt)
+    state_dim = dimension(state_dim, "state_dim")
+    if J is None and state_dim is not None and (state_dim == 0 or state_dim % 2):
+        raise ValueError("Default canonical J requires a positive even state_dim")
+    result = PHSSystem(
         H=H,
         R=R,
         G=G,
@@ -229,19 +236,22 @@ def phs_system(
         observation=observation,
         dt=dt_arr,
         state_dim=state_dim,
-        input_dim=input_dim,
-        output_dim=output_dim,
+        input_dim=dimension(input_dim, "input_dim"),
+        output_dim=dimension(output_dim, "output_dim"),
+    )
+    return (
+        result
+        if dt is None
+        else eqx.error_if(result, invalid, "dt must be finite and positive")
     )
 
 
 def partition_state(x: ArrayLike, block_sizes: Sequence[int]) -> tuple[Array, ...]:
-    """Split a one-dimensional state vector into consecutive logical blocks."""
+    """Split a vector into blocks with positive static integer sizes summing to n."""
     x = jnp.asarray(x)
-    sizes = tuple(int(size) for size in block_sizes)
+    sizes = _block_sizes(block_sizes)
     if x.ndim != 1:
         raise ValueError("partition_state() expects a one-dimensional state vector.")
-    if not sizes or any(size <= 0 for size in sizes):
-        raise ValueError("block_sizes must contain only positive integers.")
     total = sum(sizes)
     if x.shape[0] != total:
         raise ValueError(
@@ -257,14 +267,12 @@ def block_observation(
     block_sizes: Sequence[int],
     block_indices: Sequence[int],
 ) -> Callable[[Array | float, Array, Array], Array]:
-    """Build an output map that concatenates selected state blocks."""
-    sizes = tuple(int(size) for size in block_sizes)
-    indices = tuple(int(index) for index in block_indices)
-    if not sizes:
-        raise ValueError("block_sizes must not be empty.")
+    """Concatenate selected blocks, using positive static sizes and valid indices."""
+    sizes = _block_sizes(block_sizes)
+    indices = tuple(dimension(index, "block index") for index in block_indices)
     if not indices:
         raise ValueError("block_indices must not be empty.")
-    if any(index < 0 or index >= len(sizes) for index in indices):
+    if any(index is None or index >= len(sizes) for index in indices):
         raise ValueError("block_indices must refer to valid state blocks.")
 
     def output(t: Array | float, x: Array, u: Array) -> Array:
@@ -275,6 +283,13 @@ def block_observation(
     return output
 
 
+def _block_sizes(values):
+    sizes = tuple(dimension(size, "block size", minimum=1) for size in values)
+    if not sizes or any(size is None for size in sizes):
+        raise ValueError("Block sizes must contain positive static integers")
+    return sizes
+
+
 def block_matrix(
     row_block_sizes: Sequence[int],
     col_block_sizes: Sequence[int],
@@ -282,15 +297,21 @@ def block_matrix(
     *,
     dtype: jnp.dtype | None = None,
 ) -> Array:
-    """Assemble a dense matrix from block entries."""
-    row_sizes = tuple(int(size) for size in row_block_sizes)
-    col_sizes = tuple(int(size) for size in col_block_sizes)
-    if not row_sizes or not col_sizes:
-        raise ValueError("row_block_sizes and col_block_sizes must not be empty.")
-    if any(size <= 0 for size in row_sizes + col_sizes):
-        raise ValueError("Block sizes must contain only positive integers.")
+    """Assemble blocks with positive static sizes and (row, column) index keys.
+
+    Entries outside the declared grid or with incorrect shapes raise ValueError.
+    Omitted blocks are zero; provided blocks determine the promoted dtype.
+    """
+    row_sizes = _block_sizes(row_block_sizes)
+    col_sizes = _block_sizes(col_block_sizes)
 
     block_entries = {} if blocks is None else dict(blocks)
+    for key in block_entries:
+        if not isinstance(key, tuple) or len(key) != 2:
+            raise ValueError("Block keys must be (row, column) index pairs")
+        i, j = (dimension(index, "block index") for index in key)
+        if i is None or j is None or i >= len(row_sizes) or j >= len(col_sizes):
+            raise ValueError("Block index lies outside the declared block grid")
 
     # First pass: determine the fully promoted dtype across all user-supplied blocks.
     result_dtype = jnp.float32 if dtype is None else dtype
@@ -330,10 +351,16 @@ def project_psd(
     *,
     min_eigenvalue: float = 0.0,
 ) -> Array:
-    """Project a square matrix onto the symmetric PSD cone."""
+    """Project a real square matrix onto the symmetric PSD cone.
+
+    min_eigenvalue must be a finite nonnegative scalar. Supports JAX transforms
+    where the eigendecomposition is differentiable; repeated eigenvalues and
+    the clipping boundary can make derivatives undefined.
+    """
+    M, floor = _positive_inputs(M, min_eigenvalue)
     M = symmetrize_matrix(M)
     eigvals, eigvecs = jnp.linalg.eigh(M)
-    clipped = jnp.maximum(eigvals, jnp.asarray(min_eigenvalue, dtype=eigvals.dtype))
+    clipped = jnp.maximum(eigvals, floor)
     return symmetrize_matrix((eigvecs * clipped) @ eigvecs.T)
 
 
