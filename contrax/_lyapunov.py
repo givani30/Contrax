@@ -105,12 +105,20 @@ def _solve(A, Q, continuous, solver):
                 solver,
                 max_steps=solver.max_steps - steps,
             )
-            candidate = X + correction
-            improves = (
-                _residual(A, Q, candidate, continuous)[0]
-                < _residual(A, Q, X, continuous)[0]
-            )
-            return attempt + 1, jnp.where(improves, candidate, X), steps + used
+
+            # Near the rounding floor a full correction may overshoot. Try
+            # damped corrections before spending another doubling solve on
+            # the same residual (Higham, ch. 12, iterative refinement).
+            def damp(i, best):
+                candidate = X + (0.5**i) * correction
+                improves = (
+                    _residual(A, Q, candidate, continuous)[0]
+                    < _residual(A, Q, best, continuous)[0]
+                )
+                return jnp.where(improves, candidate, best)
+
+            best = jax.lax.fori_loop(0, 5, damp, X)
+            return attempt + 1, best, steps + used
 
         _, X, steps = jax.lax.while_loop(needs_refinement, refine, (0, X, steps))
         residual, scale = _residual(A, Q, X, continuous)
