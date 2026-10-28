@@ -3,6 +3,19 @@
 All notable changes to Contrax are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.1] — 2026-10-28
+
+### Fixed
+
+- Avoid stagnation in Lyapunov residual refinement by trying damped corrections.
+  This fixes NaN reverse-mode DARE rollout gradients for nonnormal systems
+  without relaxing the solver's residual tolerance or iteration budget.
+
+### Changed
+
+- Update GitHub Actions runtimes and pin Ubuntu 24.04 for CI and docs builds.
+- Add a Pepy download badge to the README.
+
 ## [0.2.0] — 2026-10-28
 
 ### Breaking changes and migration from 0.1.0
