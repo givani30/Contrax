@@ -1,7 +1,6 @@
 # Getting Started
 
-This page is the shortest path from zero context to a working Contrax
-workflow.
+Build and simulate a discrete LQR controller in a few steps.
 
 ## Install
 
@@ -11,9 +10,9 @@ For local development:
 uv sync
 ```
 
-Contrax does not enable float64 globally on import. If you plan to use
+JAX x64 mode remains unchanged on import. Enable it before using
 precision-sensitive paths such as `c2d()`, `dare()`, `care()`, or continuous
-Gramian helpers, opt into float64 explicitly:
+Gramian helpers:
 
 ```python
 import jax
@@ -40,12 +39,13 @@ D = jnp.zeros((2, 1))
 
 sys = cx.dss(A, B, C, D, dt=0.05)
 result = cx.lqr(sys, jnp.eye(2), jnp.array([[1.0]]))
-ts, xs, ys = cx.simulate(
+trajectory = cx.simulate(
     sys,
     jnp.array([1.0, 0.0]),
     lambda t, x: -result.K @ x,
     num_steps=60,
 )
+ts, xs, ys = trajectory.ts, trajectory.xs, trajectory.ys
 ```
 
 At that point you already have:
@@ -70,7 +70,7 @@ u_k = -K x_k, \qquad
 y_k = C x_k + D u_k
 $$
 
-In Contrax terms, that means:
+The workflow is:
 
 - `cx.dss(...)` defines the plant
 - `cx.lqr(...)` computes the feedback gain `K`
@@ -78,16 +78,15 @@ In Contrax terms, that means:
 
 ## What To Check
 
-On unfamiliar systems, do not stop at “the code ran”. Check:
+For a new model, check:
 
 - whether the closed-loop poles are where you expect
 - whether the Riccati residual is acceptably small for the solver path
 - whether the state trajectory behaves plausibly
 
-Discrete LQR is the clearest place to start, especially if you want gradients
-through the design-and-simulate loop. Continuous `care()` and continuous
-`simulate()` are also available, but the discrete path is still the most
-benchmark-complete slice.
+Discrete LQR is a useful starting point for gradients through controller design
+and simulation. Continuous `care()` and `simulate()` are also available; the
+discrete Riccati path has broader benchmark coverage.
 
 ## Best Next Step
 

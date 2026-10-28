@@ -49,8 +49,7 @@ more slowly.
 --8<-- "examples/lqr_optimal_execution.py:setup"
 ```
 
-This is a tiny model, but it already shows the useful part of the Contrax API:
-the execution problem is just a `DiscLTI` system plus an LQR solve.
+The execution problem is a `DiscLTI` model with an LQR design.
 
 ## Solve The Baseline Schedule
 
@@ -72,9 +71,8 @@ up the remainder very quickly.
   </figcaption>
 </figure>
 
-That plot is the center of the example. Inventory is the state, liquidation is
-the control effect, and the design question is the familiar balance between
-state penalty and control penalty.
+The plot shows inventory as the state and liquidation as the control effect.
+The design balances the inventory penalty against the trading penalty.
 
 ## Tune The Execution Urgency With Gradients
 
@@ -102,9 +100,8 @@ $$
 \text{loss}.
 $$
 
-This is the part that feels especially native to Contrax: the controller
-design step is not a separate offline calculation. It lives inside the same
-differentiable JAX program as the rest of the objective.
+The Riccati solve runs inside the differentiable JAX objective alongside the
+trajectory and loss calculations.
 
 ## Batch The Same Design Across Many Assets
 
@@ -115,9 +112,8 @@ workflow, batching becomes just another `vmap`:
 --8<-- "examples/lqr_optimal_execution.py:batched-design"
 ```
 
-That is a natural extension of the same story. Instead of solving one execution
-schedule, solve many independent schedules with different risk and impact
-weights in one compiled pass.
+Apply the same compiled design to many independent schedules with different
+risk and impact weights.
 
 ## What The Script Prints
 
@@ -126,13 +122,14 @@ baseline controller and the tuned design:
 
 ```text
 LQR optimal execution
-baseline gain          = [[0.87695257]]
+baseline gain          = [[0.87695265]]
 initial tuning loss    = 0.052402
 final tuning loss      = 0.046743
 tuned inventory risk   = 0.116998
 tuned trading cost     = 0.156547
-first sell quantities  = [8.76952567e-01 1.07906744e-01 1.32776339e-02 ...]
-batched first sells    = [0.65586909 0.87695257 0.96291202]
+first sell quantities  = [8.76952648e-01 1.07906701e-01 1.32776338e-02
+                           1.63377767e-03 2.01032015e-04]
+batched first sells    = [0.65586885 0.87695265 0.96291202]
 ```
 
 The useful checks are simple:

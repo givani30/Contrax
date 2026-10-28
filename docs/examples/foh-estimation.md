@@ -1,9 +1,8 @@
 # FOH Estimation: EKF with First-Order-Hold Inputs
 
-This example filters a nonlinear oscillator whose input varies continuously
-between sample steps. Rather than assuming the input is constant over each
-sample interval (zero-order hold), it models the piecewise-linear profile
-exactly using first-order-hold (FOH) interpolation.
+This example filters a nonlinear oscillator with an input that varies between
+samples. First-order-hold (FOH) interpolation represents the input as a linear
+profile over each sample interval.
 
 Runnable script: `examples/foh_estimation.py`
 
@@ -23,8 +22,8 @@ y_k = x_1(t_k) + v_k.
 $$
 
 The input $u(t)$ is sinusoidal and sampled on the same grid as the
-measurements. Within each sample interval, $u(t)$ is piecewise-linear rather
-than constant, so FOH gives a tighter discrete model than ZOH.
+measurements. FOH follows this piecewise-linear profile within each interval;
+zero-order hold models the input as constant there.
 
 ## Setup and Model
 

@@ -1,7 +1,7 @@
 # Simulation
 
-Simulation is the public namespace for open-loop, closed-loop, and fixed-horizon
-trajectory generation in Contrax.
+Use the simulation namespace for open-loop LTI responses, closed-loop
+trajectories, fixed-horizon nonlinear rollouts, and sampled continuous models.
 
 The namespace includes:
 
@@ -33,12 +33,13 @@ sys = cx.dss(
     dt=0.05,
 )
 K = cx.lqr(sys, jnp.eye(2), jnp.array([[1.0]])).K
-ts, xs, ys = cx.simulate(
+trajectory = cx.simulate(
     sys,
     jnp.array([1.0, 0.0]),
     lambda t, x: -K @ x,
     num_steps=80,
 )
+ts, xs, ys = trajectory.ts, trajectory.xs, trajectory.ys
 ```
 
 ## Horizon Conventions
@@ -48,17 +49,16 @@ ts, xs, ys = cx.simulate(
 - use `num_steps=...` for discrete systems
 - use `duration=...` for continuous systems
 
-LTI response functions and `simulate` return a [`SimResult`][contrax.types.SimResult]
-with `.ts`, `.xs`, `.ys`, `.status`, `.successful` and `.num_steps` fields.
-`SimResult` supports tuple unpacking of the trajectory fields:
-``ts, xs, ys = cx.simulate(...)``.
+LTI response functions and `simulate` return a
+[`SimResult`][contrax.types.SimResult] with `.ts`, `.xs`, `.ys`, `.status`,
+`.successful`, and `.num_steps` fields.
 
 For returned trajectories:
 
 Use `plot(result.state_times, result.xs)` for states and
 `plot(result.output_times, result.ys)` for outputs. Discrete simulations retain
 T outputs and T+1 states: `.state_times` includes the terminal time even when
-T is zero. `.ts` aliases output times for tuple unpacking. Continuous results
+T is zero. `.ts` aliases `.output_times`. Continuous results
 use the same sample vector for states and outputs. `.final_state` returns the
 last state and raises `ValueError` when the trajectory is empty.
 
@@ -101,7 +101,8 @@ Continuous grids whose intervals agree within a small roundoff budget reuse
 one ZOH/FOH transition exponential. Other grids retain interval-by-interval
 exponentials. Forward, reverse and higher differentiation use the general-grid
 computation, preserving derivatives with respect to every independent interval.
-The optimization benefits primal rollouts; it does not promise faster gradients.
+The reuse reduces repeated exponentials in primal rollouts. Derivative
+evaluation continues to use the general-grid computation.
 
 Use `rollout()` when there is no system object and you simply want to scan a
 transition function over a fixed input sequence.
@@ -146,7 +147,7 @@ The main transform contracts are:
   fixed-shape JAX scans
 - continuous `simulate()` uses Diffrax internally but keeps the public output
   on a fixed save grid
-- `rollout()` is intended to compose with `jit`, `vmap`, and `grad`
+- `rollout()` composes with `jit`, `vmap`, and `grad` for fixed-shape inputs
 
 That makes simulation suitable for both ordinary control scripts and compiled
 design loops.
@@ -173,11 +174,12 @@ support forward state Jacobians as required by EKF. Replacing an adjoint changes
 the supported differentiation modes; in particular, the checkpoint adjoint does
 not provide forward-mode JVP. Both explicit Tsit5 and implicit Kvaerno3 have
 sampled-Jacobian and reverse-loss coverage. Precision is determined by input
-arrays; the library does not change global precision or switch devices.
+arrays; JAX global precision settings and device selection remain under caller
+control.
 
-`step_response()` and `impulse_response()` are analysis helpers. They are good
-for inspection and sanity-checking, but they are not the preferred path for
-optimization over nonsmooth event timing.
+`step_response()` and `impulse_response()` represent discontinuous inputs with
+fixed event times. Use a smooth input parameterization when optimizing event
+timing.
 
 ## Related Pages
 

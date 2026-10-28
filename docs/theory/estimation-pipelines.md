@@ -63,10 +63,10 @@ $$
 P_{k+1}^- = A P_k^+ A^\top + Q
 $$
 
-This is the right starting point when the model is already linear and the
-Gaussian assumptions are a reasonable first approximation.
+Use the linear Kalman filter when the model is linear and Gaussian noise is a
+reasonable approximation.
 
-Contrax evaluates the posterior covariance in Joseph form by default,
+The filter evaluates the posterior covariance in Joseph form by default,
 `(I-KC) P^- (I-KC).T + K R K.T`. This is algebraically equivalent to the compact
 equation above, while retaining the positive-semidefinite noise contribution
 explicitly under roundoff. The compact form is an explicit solver option.
@@ -104,8 +104,8 @@ $$
 P_{k+1}^- = F_k P_k^+ F_k^\top + Q
 $$
 
-This is the lightest nonlinear recursive path in the library. It works best
-when the local linearization is a good approximation over one update step.
+The EKF has low per-step overhead when a local linearization approximates the
+model well over one update step.
 EKF uses the same Joseph form with the final measurement Jacobian. An explicit
 `EKF(num_iter=...)` solver relinearizes the update while holding the prior
 covariance fixed; both online and batch updates support it.
@@ -164,8 +164,8 @@ K_k = P_{xy,k} S_k^{-1}, \qquad
 \hat{x}_k^+ = \hat{x}_k^- + K_k \bigl(y_k - \hat{y}_k^-\bigr)
 $$
 
-This is the better fit when the local Jacobian story is too crude but you
-still want a recursive estimator rather than a full horizon solve.
+Use the UKF when sigma-point propagation better captures the nonlinear maps
+than local Jacobians and a recursive estimate is sufficient.
 
 ## Smoothers
 
@@ -221,17 +221,15 @@ $$
 
 ## MHE As A Sibling Workflow
 
-Moving-horizon estimation is not “just another Kalman filter.” In Contrax it is
-treated as a sibling fixed-horizon optimization workflow:
+Moving-horizon estimation optimizes the state trajectory over a fixed window:
 
 - an arrival cost anchors the start of the window
 - process costs enforce model consistency across transitions
 - measurement costs enforce agreement with the observed outputs
 - optional extra costs let the user express soft constraints or domain terms
 
-That is why `mhe_objective()` exists as a first-class pure cost function. It
-lets you keep the model, horizon, and objective explicit rather than burying
-them inside a solver wrapper.
+`mhe_objective()` exposes the model, horizon, and cost directly, so callers can
+select an optimizer separately.
 
 The fixed-horizon objective is the optimization sibling of the recursive
 filters:
@@ -258,15 +256,15 @@ Prefer:
 
 ## Transform Contracts
 
-The estimation surface is designed around fixed-shape JAX workflows:
+Estimation functions use fixed-shape JAX workflows:
 
 - batch filters are scans
 - one-step helpers can live inside larger scans
 - missing-measurement handling avoids Python branching on traced values
 - `mhe_objective()` is a pure JAX cost over explicit arrays
 
-That makes estimation pipelines compatible with the broader Contrax story:
-compiled, differentiable, and composable.
+These functions compose with compilation and differentiation when their
+individual transform contracts allow it.
 
 ## Related Pages
 

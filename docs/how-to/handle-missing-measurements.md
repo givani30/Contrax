@@ -29,7 +29,7 @@ def one_step(x, P, y, u, has_measurement):
 
 x = jnp.array([1.0])
 P = jnp.array([[0.5]])
-y = jnp.array([jnp.nan])    # missing values are never used in the update
+y = jnp.array([jnp.nan])    # ignored when has_measurement is False
 u = jnp.array([0.0])
 
 x_next, P_next, innovation = one_step(x, P, y, u, jnp.array(False))
@@ -37,29 +37,29 @@ x_next, P_next, innovation = one_step(x, P, y, u, jnp.array(False))
 
 ## What Happens
 
-When `has_measurement=False`, Contrax skips the update and returns:
+When `has_measurement=False`, the step skips the update and returns:
 
 - the predicted state
 - the predicted covariance
 - a zero innovation with the same shape as `y`
 
-This works for compiled loops because the branching happens inside JAX, not in
-Python control flow.
+The measurement flag is a JAX boolean, so the update can be skipped inside a
+compiled loop without Python branching.
 
 The same pattern works with `kalman_step()` on linear systems.
 
 ## Preconditions And Limits
 
 - Pass a measurement array with the correct shape; missing entries may be NaN.
-- Batch `kalman` and `ekf` accept a `(T,)` `has_measurement` mask with the same
-  meaning. The mask skips whole observations, rather than individual channels.
+- Batch `kalman` and `ekf` accept a `(T,)` `has_measurement` mask. Each entry
+  skips the corresponding whole observation, including all measurement channels.
 - The initial mean and covariance in batch filters are priors for measurement
   zero. Call the online update first, then predict and update for later samples.
 - Joseph covariance updates are the default. Select
   `solver=cx.solvers.Kalman(covariance_update="compact")` or
   `cx.solvers.EKF(covariance_update="compact")` explicitly for compact form.
-- This recipe handles missing samples, not irregular redefinition of the sample
-  time. Irregular timing usually needs an explicit model for the new horizon.
+- The mask skips measurements while keeping the model's sample time fixed.
+  For irregular timing, provide a model for each new time interval.
 
 ## Check
 

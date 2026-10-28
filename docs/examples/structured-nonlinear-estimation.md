@@ -1,12 +1,7 @@
 # Structured Nonlinear Estimation
 
-This example shows what the structured nonlinear layer is for in practice: keep
-the model in a port-Hamiltonian form, observe only part of the state, and still
-run the same recursive-estimation workflow as any other nonlinear system.
-
-The central estimation question here is simple: can a position-only sensor and a
-structured model recover hidden momentum cleanly enough that smoothing adds
-visible value?
+Keep the plant in port-Hamiltonian form, measure only its position, and use the
+nonlinear filtering and smoothing workflow to estimate hidden momentum.
 
 Runnable script: `examples/structured_nonlinear_estimation.py`
 
@@ -36,7 +31,7 @@ about: momentum.
 --8<-- "examples/structured_nonlinear_estimation.py:setup"
 ```
 
-The useful parts of the public surface are all visible here:
+The example uses three model and estimation helpers:
 
 - `phs_system()` defines the continuous structured model
 - `block_observation()` builds the position-only measurement map without custom indexing glue
@@ -60,7 +55,7 @@ that drives the estimator. The measurement samples use seeded Gaussian noise so 
   </figcaption>
 </figure>
 
-The middle and bottom panels tell the story. Position is the measured state, so
+The middle and bottom panels show the estimates. Position is measured, so
 filtered and smoothed `q` stay close to the truth. Momentum is not measured at
 all, so `p` is the stronger structural test.
 
@@ -76,7 +71,7 @@ filtered p rmse         = 0.104952
 smoothed p rmse         = 0.017463
 mean NIS                = 0.780241
 max innovation cond     = 1.000000
-total log likelihood    = 39.698811
+total log likelihood    = 39.698818
 skew residual           = 0.000000e+00
 min dissipation eig     = 0.000000
 ```

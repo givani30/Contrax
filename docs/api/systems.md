@@ -1,10 +1,12 @@
 # Systems
 
-`ss` and `dss` promote their matrix inputs to a common floating dtype, preserving
-explicit float32 matrices even when float64 mode is enabled. Integer inputs
-become floating arrays. `dss` stores its scalar sample time in the resulting
-real matrix dtype. Inconsistent matrix shapes raise `ValueError` immediately,
-including during tracing.
+Build continuous and discrete LTI models, nonlinear models, and
+port-Hamiltonian systems for simulation, analysis, control, and estimation.
+
+`ss` and `dss` promote matrix inputs to a common floating dtype while preserving
+explicit float32 arrays when x64 mode is enabled. Integer inputs become
+floating arrays. `dss` stores its sample time in the resulting real matrix
+dtype. Inconsistent matrix shapes raise `ValueError`, including during tracing.
 
 Nonlinear and PHS constructors also require finite positive real scalar sample
 periods when `dt` is supplied. Dimension metadata must be nonnegative static
@@ -21,10 +23,6 @@ integration status in that result. Recursive estimators require discrete
 transitions: sample a continuous vector field before passing its model to EKF,
 UKF or MHE. See [Simulation](simulation.md) for interpolation, tolerances,
 integration limits and adjoint selection.
-
-Systems is the public modeling namespace in Contrax. It brings together the
-objects and helpers you use to represent dynamics before you design a
-controller, run an estimator, or simulate a trajectory.
 
 The namespace includes:
 
@@ -49,7 +47,7 @@ The namespace includes:
 
 ## Minimal Example
 
-Use the systems namespace when you want the model-building story directly:
+Use the systems namespace to construct and transform models:
 
 ```python
 import jax
@@ -76,7 +74,7 @@ sys_d = cxs.c2d(sys_c, dt=0.05)
 
 ### LTI And Nonlinear Systems
 
-The LTI and generic nonlinear contracts are the broad modeling surface.
+These equations describe common LTI and nonlinear models.
 
 $$
 \dot{x} = A x + B u, \qquad y = C x + D u
@@ -96,8 +94,8 @@ $$
 
 ### Port-Hamiltonian Systems
 
-[`PHSSystem`][contrax.systems.PHSSystem] is the structured nonlinear family in
-Contrax.
+[`PHSSystem`][contrax.systems.PHSSystem] represents structured nonlinear
+dynamics.
 
 $$
 \dot{x} = \bigl(J - R(x)\bigr)\nabla H(x) + G(x)u
@@ -128,11 +126,9 @@ For nonlinear models, the reusable model-object contract is:
 - `dynamics(t, x, u)` for the transition or vector field
 - `output(t, x, u)` for the output or measurement map
 
-Contrax keeps continuous and discrete LTI systems on the same field names so
-code can move between them with minimal ceremony.
+Continuous and discrete LTI systems use the same matrix field names.
 
-For [`PHSSystem`][contrax.systems.PHSSystem], the base library contract is
-intentionally narrower:
+[`PHSSystem`][contrax.systems.PHSSystem] uses these fields:
 
 - `H(x)` is the storage function
 - `R(x)` is the dissipation map when present
@@ -150,9 +146,8 @@ retain their supplied values and derivatives.
 
 ## Structured Helpers
 
-Contrax now includes a small generic helper layer around structured nonlinear
-models so downstream repos do not need their own mini utility module just to
-express common PHS patterns.
+The structured helpers cover common operations on nonlinear and
+port-Hamiltonian models:
 
 Use:
 
@@ -167,8 +162,8 @@ Use:
 - `phs_diagnostics(sys, x, u)` for local skew-symmetry, dissipation, and
   instantaneous power-balance diagnostics
 
-These are intentionally lightweight helpers, not a large structured-model
-framework. They are there to make the public PHS layer ergonomic and reusable.
+The helpers operate on arrays and model data, and can be combined to build
+larger structured models.
 
 ## Port-Hamiltonian Structure Helpers
 
@@ -179,15 +174,14 @@ $$
 J_c = \begin{bmatrix} 0 & I_{n_{dofs}} \\ -I_{n_{dofs}} & 0 \end{bmatrix}
 $$
 
-Use it when building a [`PHSSystem`][contrax.systems.PHSSystem] whose
-structure map is standard symplectic rather than a custom dissipative one.
+Use it when a [`PHSSystem`][contrax.systems.PHSSystem] has the standard
+canonical structure map.
 
 `phs_to_ss(sys, x_eq, u_eq)` linearizes a PHS at an operating point and
 returns a [`ContLTI`][contrax.systems.ContLTI] for a continuous model or a
 [`DiscLTI`][contrax.systems.DiscLTI] retaining an explicit discrete period.
-For a continuous model, this is the standard bridge
-from a structured nonlinear PHS model into the linear control design stack
-(`lqr`, `place`, `kalman_gain`, etc.):
+For a continuous model, this converts a structured nonlinear PHS model to the
+linear control design path (`lqr`, `place`, `kalman_gain`, and related APIs):
 
 ```python
 lti = cx.phs_to_ss(phs_sys, x_eq=jnp.zeros(4), u_eq=jnp.zeros(1))
@@ -196,8 +190,8 @@ design = cx.lqr(cx.c2d(lti, dt=0.01), Q, R)
 
 ## Linearization And Discretization
 
-`linearize()` is the main JAX-native bridge from nonlinear plant code into the
-linear control stack (`linearize_ss` is an alias).
+`linearize()` maps nonlinear dynamics to a local LTI model; `linearize_ss` is
+an alias.
 
 Use:
 
@@ -267,8 +261,7 @@ The `c2d()` methods are:
 
 ## Interconnection
 
-Simple state-space composition lives in the same public namespace because
-it is part of the model-building story.
+Compose LTI models with state-space algebra:
 
 Use:
 
@@ -276,7 +269,8 @@ Use:
 - `parallel(sys1, sys2)` or `sys1 + sys2` for summed-output composition
 - `sys1 - sys2` for parallel subtraction
 
-Mixed continuous/discrete interconnections are intentionally unsupported, and
+Interconnected systems must share a time domain and, for discrete models, a
+sample period. The composition helpers validate these conditions. In addition,
 discrete interconnections require matching `dt`.
 
 State ordering is explicit:
@@ -286,32 +280,30 @@ State ordering is explicit:
 
 ## Transform Behavior
 
-The system containers themselves are pytrees, so they work naturally with
-`jit` and `vmap` when shapes line up. That matters because the intended
-Contrax workflows include vmapped linearization, batched controller design, and
-compiled design-and-simulate objectives.
+System containers are pytrees and compose with `jit` and `vmap` when their
+shapes are compatible. This supports vmapped linearization, batched controller
+design, and compiled design-and-simulation objectives.
 
 The important user-facing transform contracts here are:
 
 - `linearize()` and `linearize_ss()` are designed to compose with `jit` and
   `vmap`
-- [`DiscLTI.dt`](#contrax.systems.DiscLTI.dt) stays as an array leaf rather
-  than static metadata, which makes batching over systems more natural
+- [`DiscLTI.dt`](#contrax.systems.DiscLTI.dt) is an array leaf, so batches can
+  include different sample periods
 - composition helpers use state-space algebra with checked family, shape and
   matching-period contracts; period mismatch checks remain active under jit
 
 ## Numerical Notes
 
-Contrax does not enable float64 globally on import. Precision-sensitive system
+Importing the package leaves JAX x64 mode unchanged. Precision-sensitive
 helpers such as `c2d()` require `jax_enable_x64=True`.
 
-For nonlinear local models, remember that `linearize()` and `linearize_ss()`
-produce local behavior around one operating point; they are not a guarantee of
-global model fidelity.
+`linearize()` and `linearize_ss()` approximate behavior near the chosen
+operating point. Accuracy can decrease farther from that point.
 
-The structured-system diagnostics are local algebraic checks. They are useful
-for sanity checking model definitions and recursive-estimation plumbing, but
-they are not a formal certificate of passivity or robustness.
+The structured-system diagnostics report local algebraic properties at the
+supplied state and input. Interpret them with the model assumptions when
+assessing passivity or robustness.
 
 ## Related Pages
 

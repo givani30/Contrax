@@ -1,9 +1,7 @@
 # Linearize, LQR, Simulate
 
-This tutorial shows a standard control workflow on a pendulum. The model starts
-as ordinary nonlinear JAX code, then Contrax linearizes it, discretizes the
-local state-space realization, designs an LQR controller, and simulates the
-closed loop.
+Linearize a nonlinear pendulum, discretize the local model, design an LQR
+controller, and simulate the closed loop.
 
 <figure class="contrax-figure">
   <img src="/assets/images/linearize-lqr-pipeline.svg"
@@ -16,11 +14,6 @@ closed loop.
 </figure>
 
 Runnable script: `examples/linearize_lqr_simulate.py`
-
-This tutorial is the clearest first tour through the new docs structure:
-[Systems](../api/systems.md) for model construction and linearization,
-[Control](../api/control.md) for LQR design, and
-[Simulation](../api/simulation.md) for the closed-loop rollout.
 
 The pendulum model in the example is
 
@@ -93,13 +86,8 @@ compiled boundary:
 --8<-- "examples/linearize_lqr_simulate.py:design-and-simulate"
 ```
 
-That compiled function keeps the full path in one JAX program: choose an
-operating point, linearize, design the controller, and simulate the closed
-loop.
-
-That is one of Contrax's main ergonomic goals: the code still reads like a
-standard controls workflow, but the full pipeline also stays inside a
-fixed-shape JAX program.
+The compiled function chooses an operating point, linearizes the model, designs
+the controller, and simulates the closed loop in one fixed-shape JAX program.
 
 ## What The Script Prints
 
@@ -132,17 +120,6 @@ initial one.
 For unfamiliar systems, inspect the closed-loop poles and the response
 trajectory before trusting a controller. The runnable script mirrors these
 checks so this tutorial stays tied to executable code.
-
-## How To Read This Workflow In Contrax
-
-- `linearize` belongs to the Systems surface because it turns a nonlinear
-  model into a local state-space system.
-- `c2d` is also part of Systems because discretization is still part of model
-  preparation.
-- `lqr` and `state_feedback` belong to Control because they design and apply
-  the controller.
-- `simulate` belongs to Simulation because it executes the resulting closed
-  loop.
 
 ## Where To Go Next
 

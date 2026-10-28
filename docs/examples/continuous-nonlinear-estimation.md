@@ -1,13 +1,12 @@
 # Continuous Nonlinear Estimation
 
-This example starts from a simple but realistic estimation problem: the plant is
-continuous-time, the measurements arrive on a discrete grid, the input varies
-inside each sample interval, and the sensor only reports part of the state.
+Estimate a continuous-time plant from discrete measurements while the input
+varies inside each sample interval and the sensor measures only part of the
+state.
 
-That combination is where Contrax's continuous-to-discrete estimation bridge is
-supposed to matter. The model stays continuous and nonlinear, `sample_system()`
-turns it into a discrete transition map, and the UKF/UKS pipeline works on the
-measurement grid without application-side glue code.
+`sample_system()` integrates the continuous nonlinear model over each sample
+interval and returns a discrete transition map for UKF filtering and UKS
+smoothing on the measurement grid.
 
 Runnable script: `examples/continuous_nonlinear_estimation.py`
 
@@ -44,10 +43,8 @@ history of partial observations.
 
 Two pieces matter here.
 
-First, the plant remains a continuous `NonlinearSystem`. We are not rewriting it
-as an ad hoc discrete transition by hand.
-
-Second, the sampled estimator model uses
+The plant remains a continuous `NonlinearSystem`. The sampled estimator model
+uses
 `sample_system(..., input_interpolation="foh")`. Each discrete input step is an
 endpoint pair `(u_k, u_{k+1})`, so the internal one-step solver sees a
 piecewise-linear torque profile instead of a zero-order hold.
@@ -94,7 +91,7 @@ filtered rate rmse      = 0.076574
 smoothed rate rmse      = 0.039148
 mean NIS                = 0.849424
 max innovation cond     = 1.000000
-total log likelihood    = 38.985644
+total log likelihood    = 38.985647
 ```
 
 The useful checks are straightforward:

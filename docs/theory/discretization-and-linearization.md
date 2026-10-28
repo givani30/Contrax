@@ -1,10 +1,8 @@
 # Discretization And Linearization
 
-Discretization and linearization are the bridge between nonlinear plant models
-and the most mature control-design slice in Contrax.
-
-They are also where “JAX-native” starts to matter for model construction, not
-just for solvers.
+Linearize nonlinear dynamics at an operating point, then discretize the local
+model for discrete-time controller design. JAX derivatives support model
+construction and batching over operating points.
 
 ## Where They Fit
 
@@ -18,8 +16,7 @@ just for solvers.
   </figcaption>
 </figure>
 
-That flow matters because Contrax’s strongest controller-design path is
-still the discrete Riccati slice around `dare()`.
+The discrete Riccati path through `dare()` has the broadest benchmark coverage.
 
 ## Linearization
 
@@ -27,9 +24,8 @@ still the discrete Riccati slice around `dare()`.
 point and returns them as a `ContLTI`. `linearize_ss` is an alias for
 `linearize`.
 
-The key design choice is that these are direct JAX differentiation helpers, not
-symbolic or offline preprocessing steps. That makes vmapped operating-point
-sweeps and compiled local-model construction part of the intended workflow.
+JAX differentiation computes the model Jacobians, so compiled local-model
+construction and vmapped operating-point sweeps use the same code path.
 
 Use:
 
@@ -57,21 +53,17 @@ C = \left.\frac{\partial h}{\partial x}\right|_{(x_0, u_0)}, \quad
 D = \left.\frac{\partial h}{\partial u}\right|_{(x_0, u_0)}
 $$
 
-Contrax computes those Jacobians directly with JAX automatic differentiation,
-so operating-point sweeps and vmapped local-model construction are part of the
-intended workflow rather than separate preprocessing steps.
-
 ## Discretization
 
 `c2d()` converts a `ContLTI` to a `DiscLTI`.
 
 The public methods are:
 
-- `zoh`: zero-order hold, the stronger path
-- `tustin`: bilinear transform, mainly a convenience discretization
+- `zoh`: zero-order hold, recommended for differentiable and reference-checked
+  workflows
+- `tustin`: bilinear transform for applications that call for that mapping
 
-The `zoh` path matters more because it is the one intended for differentiable
-and reference-checked design workflows.
+The `zoh` path has broader derivative and reference coverage.
 
 ## Zero-Order Hold Path
 
@@ -112,11 +104,11 @@ $$
 
 ## Caveats
 
-- `linearize()` (and its alias `linearize_ss()`) produces a local approximation,
-  not a global model guarantee
+- `linearize()` (and its alias `linearize_ss()`) approximates behavior near the
+  chosen operating point
 - `c2d()` is precision-sensitive and requires `jax_enable_x64=True`
 - `zoh` is the path to prefer for serious workflows today
-- `tustin` is useful, but not the headline differentiable discretization path
+- `tustin` provides the bilinear frequency mapping
 
 ## Practical Checks
 

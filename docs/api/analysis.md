@@ -1,7 +1,7 @@
 # Analysis
 
-Analysis is the public namespace for structural checks and transfer-oriented
-inspection of state-space models.
+Use the analysis namespace to inspect controllability, observability, poles,
+transfer response, Gramians, Lyapunov solutions, and finite invariant zeros.
 
 The namespace includes:
 
@@ -42,14 +42,12 @@ Wc = cx.ctrb_gramian(sys, t=2.0).X
 - `freqresp(sys, omega)` evaluates over a frequency grid
 - `dcgain(sys)` evaluates the zero-frequency or steady-state gain
 
-These helpers are intentionally focused on state-space analysis rather than a
-full transfer-function algebra layer.
+The transfer helpers evaluate state-space realizations directly.
 
 ## Transform Behavior
 
-Most analysis helpers are direct array computations on fixed system data, so
-they fit naturally into `jit` and batched workflows when the underlying linear
-algebra path does.
+Array-based analysis helpers compose with `jit` and batching when the
+underlying linear algebra operation supports those transformations.
 
 Gramian helpers support `jit`, `vmap`, JVP and VJP. Discrete finite horizon
 counts are static Python integers. Continuous finite horizons use a matrix
@@ -114,7 +112,7 @@ checks in eager or compiled execution. Singular equations and nonconvergent
 iterations must be handled before using their solutions. The returned residual
 is a Frobenius norm; success requires it to be at most
 `atol + rtol * scale`, where `scale` sums norms of the individual equation
-terms. This is a backward-error criterion, not a forward-error bound on an
+terms. This bounds backward error; it does not bound forward error for an
 ill-conditioned equation.
 
 ## Finite Invariant Zeros
@@ -138,10 +136,11 @@ Validation includes its rectangular nonminimal example and the transposed
 system, as well as independent generalized eigenvalues for regular square
 pencils.
 
-This is rank-dependent design-time analysis: float64 mode is required and
-`jit`, `vmap` and derivatives are unsupported. Tolerances determine numerical
-rank; near rank transitions, check sensitivity to `rtol`, `atol` and realization
-scaling. Infinite zeros and Kronecker indices are not returned.
+Zero computation uses host-side rank decisions and requires float64 precision;
+it cannot be jitted, vmapped, or differentiated. Tolerances determine numerical
+rank, so check sensitivity to `rtol`, `atol`, and realization scaling near rank
+transitions. The result contains finite zeros; it omits infinite zeros and
+Kronecker indices.
 
 ## Quadratic Feedback Costs
 
@@ -152,8 +151,8 @@ $$
 + x_N^\top Q_{\mathrm{terminal}} x_N,\qquad u_k=-Kx_k.
 $$
 
-Omit `Q_terminal` for zero terminal cost. The discrete system's sample time
-does not multiply the cost: Q and R define per-step weights. Binary Gramian
+Omit `Q_terminal` for zero terminal cost. `Q` and `R` weight each step
+independently of the discrete system's sample time. Binary Gramian
 composition uses O(log N) matrix products and O(n²) storage, without retaining
 a trajectory. Stability is unnecessary for a finite horizon, but long unstable
 horizons may overflow. It returns a scalar for one `(n,)` initial state;
@@ -169,9 +168,10 @@ costs = jax.vmap(lambda x: cx.quadratic_rollout_cost(
 ```
 
 The horizon is a static nonnegative Python integer. Zero steps return only
-the optional initial-state terminal cost. Float32 and float64, `jit`, `vmap`,
-JVP and VJP are supported. Tests compare values and gain derivatives with an
-explicit state/input trajectory sum.
+the optional initial-state terminal cost. Float32 and float64 inputs are
+supported. The cost composes with `jit`, `vmap`, JVP, and VJP. Validation
+compares values and gain derivatives with an explicit state/input trajectory
+sum.
 
 ## Numerical Notes
 

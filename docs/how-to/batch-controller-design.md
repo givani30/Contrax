@@ -36,7 +36,8 @@ Ks = jax.jit(jax.vmap(design))(x_eqs, u_eqs)
 ## Why This Recipe Works
 
 - `linearize()` is designed to compose with `vmap`
-- `DiscLTI.dt` stays as an array leaf rather than static metadata
+- `DiscLTI.dt` is an array leaf, so batched systems can have different sample
+  periods
 - the design function keeps one fixed-shape workflow:
   `linearize -> c2d -> lqr`
 

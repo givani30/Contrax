@@ -1,7 +1,7 @@
 # Control
 
-Control is the public namespace for controller design and Riccati-backed
-feedback synthesis in Contrax.
+Use the control namespace to solve Riccati equations, design LQR/LQI gains, and
+place closed-loop poles for LTI systems.
 
 The namespace includes:
 
@@ -57,18 +57,16 @@ closed_loop = cx.state_feedback(sys, result.K)
 
 `place()` returns a [`PlaceResult`](types.md#contrax.types.PlaceResult) with
 `.K` (state-feedback gain, shape `(m, n)`) and `.poles` (achieved closed-loop
-eigenvalues). It supports tuple unpacking: ``K, poles = cx.place(...)``.
-Inspect `.status`, `.successful`, `.assignment_error`, conditioning estimates
-and `.num_steps` before using a candidate. A finite gain can still fail
-acceptance checks.
+eigenvalues). Check `.status`, `.successful`, `.assignment_error`, conditioning
+estimates, and `.num_steps` before using a candidate. A finite gain can fail
+the acceptance checks.
 
 For `lqi()`, the returned gain acts on the augmented state `[x; z]`, where `z`
 is the integral state added by `augment_integrator()`.
 
 ## Control Equations
 
-Contrax's control surface is centered on state-feedback design for linear
-systems.
+LQR designs state feedback for linear systems.
 
 For the discrete-time model
 
@@ -204,7 +202,7 @@ convergence, assignment and conditioning limits. `auto` selects KNV0 for real
 poles and YT for conjugate pairs. SVD input subspaces support redundant or
 dependent input columns. A bounded small-SISO Ackermann fallback must pass
 the same achieved-assignment and conditioning checks as the robust route.
-No fallback overrides an invalid method or malformed conjugate-pole request.
+The solver rejects invalid methods and malformed conjugate-pole requests.
 
 ```python
 placement = cx.place(sys, [0.7, 0.8],
@@ -212,9 +210,10 @@ placement = cx.place(sys, [0.7, 0.8],
 assert placement.successful
 ```
 
-This is float64, design-time functionality: call it outside `jit`, `vmap` and
-differentiation. Model matrices are promoted to float64 with explicit float64
-mode enabled. Numerically uncontrollable models report `invalid_problem`;
+Pole placement is a float64 design-time calculation and runs outside `jit`,
+`vmap`, and differentiation. Model matrices are promoted to float64 when the
+global x64 option is enabled. Numerically uncontrollable models report
+`invalid_problem`;
 assignment or conditioning breakdown reports `numerical_failure`. Exhausting
 robust update sweeps reports `max_steps_reached` when a finite, otherwise valid
 candidate remains. `throw=False` returns diagnostics and `throw=True` raises.
@@ -225,28 +224,25 @@ Inputs and incompatible configurations are validated before numerical work.
 `dare()`, `care()`, and `lqr()` are designed to participate in compiled JAX
 workflows.
 
-The key contracts are:
+The relevant transform behavior is:
 
 - `lqr()` dispatches on [`DiscLTI`][contrax.systems.DiscLTI] vs
   [`ContLTI`][contrax.systems.ContLTI] outside traced runtime values
-- the Riccati paths support implicit JVPs and VJPs rather than differentiating
-  through the forward iteration or Hamiltonian eigenvectors
+- the Riccati paths differentiate the equation implicitly
 - `state_feedback()` is just state-space algebra on the model matrices
 
-That makes controller design inside a JIT-compiled objective a first-class use
-case rather than an accidental one.
+These paths allow controller design inside a JIT-compiled objective.
 
 ## Numerical Notes
 
-Contrax does not enable float64 globally on import. Riccati solves require
-`jax_enable_x64=True`.
+Riccati solves require `jax_enable_x64=True`; JAX x64 mode is not changed on
+import.
 
-`state_feedback(sys, K)` is specifically about applying a state-feedback gain
-to an LTI model. It is not the general interconnection operator for arbitrary
-controller/plant block diagrams.
+`state_feedback(sys, K)` applies a gain to an LTI model. Use `series()` or
+`parallel()` to compose LTI systems.
 
-For integral-action designs, `augment_integrator()` exposes the augmented model
-directly and `lqi()` is the thin convenience wrapper on top.
+For integral-action designs, use `augment_integrator()` to build the augmented
+model or `lqi()` to design the gain in one call.
 
 ## Related Pages
 

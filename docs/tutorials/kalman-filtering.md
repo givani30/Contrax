@@ -1,9 +1,7 @@
 # Kalman Filtering
 
-This tutorial shows a standard estimation workflow on a small discrete system.
-We will define a state-space model, run a linear Kalman filter on a measurement
-sequence, smooth the result with RTS, and finish with checks that tell us
-whether the estimate is behaving plausibly.
+Define a discrete state-space model, filter a measurement sequence with the
+linear Kalman filter, then smooth the result with RTS and inspect the estimate.
 
 <figure class="contrax-figure">
   <img src="/assets/images/estimation-pipeline.svg"
@@ -61,8 +59,8 @@ the filtered trajectory using the same process model and process noise.
 --8<-- "examples/kalman_filtering.py:filter-and-smooth"
 ```
 
-In Contrax, the filter treats `(x0, P0)` as the prior on `x_0` and updates
-first with `y_0`. That convention matters when you compare the batch result to
+The filter treats `(x0, P0)` as the prior on `x_0` and updates first with `y_0`.
+This convention matters when comparing the batch result to
 the one-step `kalman_update()` and `kalman_step()` helpers in runtime loops.
 
 ## What The Script Prints
@@ -82,7 +80,7 @@ innovation norm          = 0.932813
 final covariance trace   = 0.007035
 ```
 
-The exact numbers are not the point. The useful checks are whether the filter
+The useful checks are whether the filter
 produces a state estimate consistent with the measurements, keeps covariance
 bounded, and shows the role of smoothing clearly: the interior smoothed state
 can differ from the filtered one, while the terminal RTS state matches the
@@ -97,8 +95,7 @@ For a first estimation workflow, the checks should be easy to interpret:
 - the covariance trace should stay finite and reasonably small
 - the innovation sequence should not blow up
 
-The runnable example mirrors those checks with assertions so this tutorial stays
-tied to executable code rather than drifting into static documentation.
+The runnable example mirrors these checks with assertions.
 
 ## Where To Go Next
 

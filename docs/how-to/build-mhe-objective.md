@@ -52,10 +52,9 @@ That alignment matches:
 - one process residual per transition
 - one measurement residual per state in the window
 
-## Why This Is Useful
+## Objective And Optimizer
 
-`mhe_objective()` is the pure cost-function layer of Contrax’s optimization-
-based estimation story. It lets you:
+`mhe_objective()` exposes the fixed-window cost directly. This lets you:
 
 - keep the horizon fixed-shape
 - add custom soft costs explicitly
@@ -68,8 +67,7 @@ Two small helpers are useful in rolling-window workflows:
 - `soft_quadratic_penalty(residuals, weight)` builds a weighted quadratic soft
   cost that you can add inside `extra_cost`
 
-If you want the built-in thin solver wrapper, move from `mhe_objective()` to
-`mhe()`.
+Use `mhe()` to minimize this objective with a configured optimizer.
 
 ## Check
 

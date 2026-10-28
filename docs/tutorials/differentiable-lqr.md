@@ -1,11 +1,7 @@
 # Differentiable LQR
 
-This tutorial shows one of Contrax's defining workflows: optimizing controller
-weights inside an ordinary JAX objective.
-
-The idea is simple: treat controller design as part of a larger JAX objective.
-Instead of choosing `Q` and `R` offline and then freezing them, make them
-parameters in a differentiable loop.
+Optimize discrete LQR weights inside a JAX objective by treating `Q` and `R` as
+parameters of the design and simulation loop.
 
 Runnable script: `examples/differentiable_lqr.py`
 
@@ -26,9 +22,8 @@ dq, dlog_r = objective_and_grad(
 )[1]
 ```
 
-The important part is not the syntax. It is the workflow shape: `lqr()` and
-`simulate()` inside an ordinary compiled JAX objective with gradients that stay
-finite and usable.
+The compiled objective calls `lqr()` and `simulate()`, so gradients flow through
+controller design and the closed-loop trajectory.
 
 At the control level, the script is optimizing the discrete LQR workflow
 
@@ -93,12 +88,10 @@ important check is simpler: the cost goes down and the gradients stay finite.
 
 Three pieces matter:
 
-1. `lqr()` on discrete systems goes through `dare()`, which has an
-   implicit-differentiation JVP/VJP rules rather than a backward pass that unrolls
-   the forward solver iterations.
+1. `lqr()` on discrete systems calls `dare()`, whose implicit derivative solves
+   the Riccati sensitivity equation without traversing the forward iterations.
 2. `simulate()` is a pure JAX closed-loop scan for discrete systems.
-3. the system object is a pytree-friendly Equinox module rather than a class
-   with hidden runtime behavior.
+3. the system object is an Equinox pytree whose matrices are dynamic array data.
 
 That combination keeps controller design, simulation, and optimization in the
 same JAX world.
@@ -118,8 +111,8 @@ The script prints:
 - the final tuned `R`
 - the resulting feedback gain
 
-The exact numbers are not the main point. The point is that the optimization
-loop is ordinary JAX code rather than a separate control-design procedure.
+The optimization loop uses standard JAX transformations around the controller
+design and simulation calls.
 
 From a control perspective, the important object is still the closed-loop
 matrix
@@ -144,15 +137,13 @@ give a fast sanity check that the optimization stayed in a plausible regime.
 
 ## Scope Of This Tutorial
 
-This tutorial intentionally stays on the discrete LTI path. It is the cleanest
-path for differentiating through controller design: `lqr()` uses `dare()`, and
-the closed-loop rollout uses the pure JAX discrete `simulate()` scan.
+This tutorial uses discrete LTI systems: `lqr()` calls `dare()`, and the
+closed-loop rollout uses the JAX discrete `simulate()` scan.
 
-Continuous-time LQR and continuous simulation are available through `care()` and
-the Diffrax-backed `simulate()` path, but they are a different workflow with
-different solver and adjoint choices. Pole placement is also available for
-design-time feedback design, but it is not the right primitive for gradient
-tuning of `Q` and `R`.
+Continuous-time LQR and simulation use `care()` and the Diffrax-backed
+`simulate()` path, with separate solver and adjoint choices. Pole placement
+designs against desired poles; this tutorial uses LQR to optimize weights
+through a differentiable gain map.
 
 ## Where to Go Next
 

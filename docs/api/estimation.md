@@ -1,7 +1,7 @@
 # Estimation
 
-Estimation is the public namespace for recursive filtering, smoothing, and the
-first optimization-based estimation primitives in Contrax.
+Use the estimation namespace for recursive filters, smoothers, and
+fixed-window optimization.
 
 The namespace includes:
 
@@ -39,9 +39,9 @@ result = cx.kalman(sys, jnp.zeros((20, 2)), Q=0.001 * jnp.eye(2), R=0.01 * jnp.e
   <img src="/assets/images/estimation-pipeline.svg"
        alt="Estimation pipeline from model and measurements through filtering, smoothing, and moving-horizon estimation" />
   <figcaption>
-    <strong>The estimation surface is layered:</strong> batch filters produce
-    filtered trajectories, smoothers revisit them offline, and MHE uses the
-    same model and noise assumptions in an explicit fixed-horizon objective.
+    <strong>Estimation workflow:</strong> batch filters produce filtered
+    trajectories, smoothers use future observations, and MHE optimizes an
+    explicit fixed-horizon objective.
   </figcaption>
 </figure>
 
@@ -61,9 +61,8 @@ result = cx.kalman(sys, jnp.zeros((20, 2)), Q=0.001 * jnp.eye(2), R=0.01 * jnp.e
 - [`UKFResult.innovation_covariances`](types.md#contrax.types.UKFResult.innovation_covariances):
   innovation covariance sequence with shape `(T, p, p)` for `ukf()`
 
-Contrax uses the update-first batch convention for `kalman()`, `ekf()`, and
-`ukf()`: `(x0, P0)` is the prior on `x_0`, and the first scan step updates
-with `y_0`.
+Batch `kalman()`, `ekf()`, and `ukf()` use an update-first convention: `(x0,
+P0)` is the prior on `x_0`, and the first step updates with `y_0`.
 
 Linear filtering accepts `us=(T, m)` for both feedthrough at k and the transition
 from k to k+1. EKF uses the same convention. `kalman` and `ekf` accept a `(T,)`
@@ -77,18 +76,17 @@ $$
 P^+ = (I-KH)P^-(I-KH)^\top + K R K^\top.
 $$
 
-Here H is C for the linear filter. Select compact form explicitly with
+Here `H` is `C` for the linear filter. Select compact form with
 `cx.solvers.Kalman(covariance_update="compact")` or
-`cx.solvers.EKF(covariance_update="compact")`. No eigenvalue clipping or
-automatic precision changes are applied. Pass consistent dtypes for model,
-noise, initial conditions and observations; float32 workflows retain float32.
+`cx.solvers.EKF(covariance_update="compact")`. Pass consistent dtypes for the
+model, noise, initial conditions, and observations; float32 workflows retain
+float32.
 For a controlled linear smoother, pass the forward controls to `rts(..., us=us)`.
 
 ## Estimator Equations
 
-Contrax uses an update-first batch convention: the pair `(x0, P0)` is the
-prior on `x_0`, the first step updates with `y_0`, and only then predicts the
-prior on `x_1`.
+The batch pass starts from prior `(x0, P0)` on `x_0`, updates with `y_0`, and
+then predicts the prior on `x_1`.
 
 For linear discrete models, the state and observation maps are
 
@@ -266,8 +264,8 @@ J_{\mathrm{MHE}} =
 \sum_{k=0}^{N-1}\|y_k - h(t_k, x_k, u_k)\|_{R^{-1}}^2
 $$
 
-This is the optimization sibling of the recursive filters: the same model and
-noise assumptions appear, but they are expressed as an explicit horizon cost.
+The objective uses the same model and noise assumptions as the recursive
+filters, expressed as a cost over the full horizon.
 
 Pass a discrete LTI or nonlinear system directly: `mhe(model, xs_init, us, ys,
 x_prior, P_prior, Q_noise, R_noise)`. The window contains N states and
@@ -280,30 +278,29 @@ endpoint. The default terminal pair holds the last right endpoint at both ends.
 `ts` supplies explicit sample times for time-dependent models. Callable
 transitions accept `f(x, u)` and require `observation=h` separately.
 
-Arrival, process and observation covariances must be finite, symmetric and
-positive definite: invalid covariances report `invalid_problem` even if the
-optimizer converges. The objective uses covariance solves; singular-noise
-constraints are not represented by this formulation.
+The arrival, process, and observation covariances must be finite, symmetric,
+and positive definite. Invalid covariances report `invalid_problem`, even if
+the optimizer converges.
 
 Native Optimistix minimizers are accepted through `solver=`. The wrapper retains
 the best finite accepted iterate when the iteration limit is reached and
-returns `.status`, `.successful`, `.num_steps`, `.gradient_norm`, `.initial_cost`
-and `.final_cost`. `throw=True` enables checked convergence failures. An
-approximate finite estimate is not reported as successful merely because its
-cost decreased.
+returns `.status`, `.successful`, `.num_steps`, `.gradient_norm`, `.initial_cost`,
+and `.final_cost`. Success requires solver convergence and valid result checks;
+a finite cost reduction alone does not establish convergence. `throw=True`
+enables checked convergence failures.
 
 Implicit JVP/VJP derivatives include model, noise and explicit parameter data
 passed through optimizer arguments. They assume a converged stationary point
 with a nonsingular Hessian. Check convergence before interpreting derivatives
 of a limited or ill-conditioned solve.
 
-Optimistix LBFGS versions that allocate history in JAX's default dtype cannot
-initialize float32 trajectories while x64 mode is enabled. Contrax preserves
-the arrays and reports this configuration error. A validated option for small
+Some Optimistix LBFGS versions that allocate history in JAX's default dtype
+cannot initialize float32 trajectories while x64 mode is enabled. The wrapper
+preserves the arrays and reports this configuration error. A validated option for small
 float32 windows in that context is native `optx.BFGS(rtol=1e-6, atol=1e-6)`;
 its dense Hessian storage grows quadratically in the window's variable count.
-Alternatively, select a float32 JAX context explicitly before solving. Contrax
-does not change global precision to accommodate an optimizer.
+Alternatively, select a float32 JAX context before solving. JAX global
+precision settings are not changed by the estimator.
 
 For rolling-window use:
 
@@ -312,10 +309,9 @@ For rolling-window use:
 - `soft_quadratic_penalty(residuals, weight)` is a small helper for soft state,
   terminal, or envelope penalties inside `extra_cost`
 
-Scalar and matrix penalty weights both represent cost/precision weighting:
-`w * sum(r**2)` or `sum(r.T @ W @ r)`. A matrix is not interpreted as a
-covariance. For a covariance-weighted residual, use an explicit factor solve
-before applying a scalar penalty.
+Scalar and matrix penalty weights represent cost or precision weighting:
+`w * sum(r**2)` or `sum(r.T @ W @ r)`. For covariance-weighted residuals,
+apply an explicit factor solve before the penalty.
 
 ## Explicit Linear Filter Algorithms
 
@@ -345,10 +341,10 @@ Steady-state mode uses it as the default `P0` and computes the Joseph posterior
 covariance once. It validates the gain, Riccati fixed point, initialization and
 estimator stability. A mismatched design or missing observation reports
 `invalid_problem`, with optional checked failure through `throw=True`.
-No design is cached implicitly. To differentiate a loss with respect to model
-or noise parameters, construct `kalman_gain` inside that differentiable workflow
-and pass its result to the solver. Holding a design fixed while changing its
-model/noise data is an inconsistent cached problem.
+`SteadyStateKalman` uses the supplied design on each call. To differentiate a
+loss with respect to model or noise parameters, construct `kalman_gain` inside
+that differentiable workflow and pass its result to the solver. A design held
+fixed while its model or noise data changes is inconsistent.
 
 Information mode takes a positive variance vector `(p,)` and factors matrices
 in state dimension after whitening the prior. It forms no prior inverse and
@@ -356,9 +352,10 @@ no `p`-by-`p` innovation matrix. This can reduce work and storage for wide
 observation maps and avoid loss of small diagonal noise in a dense innovation
 matrix. It requires positive-definite priors at observed steps; covariance-form
 filtering also supports semidefinite priors with nonsingular innovations.
-Information mode retains the usual controls, whole-observation masks, zero/identity
-initialization defaults and float32/float64 precision. Numerical failure is
-reported rather than repaired with jitter. Both options are accepted by the
+Information mode retains the usual controls, whole-observation masks,
+zero/identity initialization defaults, and float32/float64 precision. Supply
+positive-definite covariances; numerical failures are returned in the result.
+Both options are accepted by the
 linear online update and combined-step helpers as well as batch filtering.
 
 ## One-Step Helper Signatures
@@ -376,16 +373,22 @@ keyword-only, with the same `Q`, `R` and `u` names throughout.
 
 ```python
 # predict: advances state by one step
-x_pred, P_pred = cx.ekf_predict(model, x, P, u=u, Q=Q_noise)
-x_pred, P_pred = cx.kalman_predict(sys, x, P, Q=Q_noise, u=None)  # u optional
+prediction = cx.ekf_predict(model, x, P, u=u, Q=Q_noise)
+x_pred, P_pred = prediction.x, prediction.P
+prediction = cx.kalman_predict(sys, x, P, Q=Q_noise, u=None)  # u optional
+x_pred, P_pred = prediction.x, prediction.P
 
 # update: fuses a new measurement
-x, P, innov = cx.ekf_update(model, x_pred, P_pred, y, R=R_noise)
-x, P, innov = cx.kalman_update(sys, x_pred, P_pred, y, R=R_noise, u=None)
+update = cx.ekf_update(model, x_pred, P_pred, y, R=R_noise)
+x, P, innov = update.x, update.P, update.innovation
+update = cx.kalman_update(sys, x_pred, P_pred, y, R=R_noise, u=None)
+x, P, innov = update.x, update.P, update.innovation
 
 # combined predict-update step
-x, P, innov = cx.ekf_step(model, x, P, y, u=u, Q=Q_noise, R=R_noise)
-x, P, innov = cx.kalman_step(sys, x, P, y, Q=Q_noise, R=R_noise, u=None)
+update = cx.ekf_step(model, x, P, y, u=u, Q=Q_noise, R=R_noise)
+x, P, innov = update.x, update.P, update.innovation
+update = cx.kalman_step(sys, x, P, y, Q=Q_noise, R=R_noise, u=None)
+x, P, innov = update.x, update.P, update.innovation
 ```
 
 `has_measurement=False` can be passed to all step helpers to skip the update
@@ -415,39 +418,36 @@ result = cx.ukf(sys_d, ys, Q=Q_noise, R=R_noise, us=us, x0=x0, P0=P0)
 smoothed = cx.uks(result)
 ```
 
-`ukf()` returns
-[`UKFResult`][contrax.types.UKFResult] rather than
-[`KalmanResult`][contrax.types.KalmanResult] because sigma-point filtering
-exposes additional public intermediates: predicted measurements, innovation
-covariances, per-step likelihood terms, and the one-step prediction quantities
-used by `uks()`.
+`ukf()` returns [`UKFResult`][contrax.types.UKFResult], which includes predicted
+measurements, innovation covariances, per-step likelihood terms, and the
+prediction quantities used by `uks()`.
 
 The filter result retains `.has_measurement`. Missing observations have zero
 innovation, predicted measurement, innovation covariance and likelihood
 placeholders. `ukf_diagnostics` excludes them from solves and averages. The
 individual diagnostics functions also accept `has_measurement=`. With no
 observations, aggregate means and extrema are NaN, likelihood totals are zero,
-and missing data alone does not set `nonfinite`.
+and `nonfinite` remains false when all observations are missing.
 
-For continuous dynamics with discrete observations, `sample_system()` is the
-main library bridge. It integrates the continuous vector field over one sample
+For continuous dynamics with discrete observations, `sample_system()` integrates
+the continuous vector field over one sample
 interval and returns a discrete-time `NonlinearSystem` that can be passed
 directly to `ekf()` or `ukf()`.
 
 ## Transform Behavior
 
-Batch filters, online helpers and smoothers expose JAX scalar `.status` and
+Batch filters, online helpers, and smoothers expose JAX scalar `.status` and
 `.successful` diagnostics. Online prediction results have `.x` and `.P`;
-updates also have `.innovation`. Tuple unpacking remains available. Invalid
-noise or initial covariances return `invalid_problem`; nonfinite outputs or
+updates also have `.innovation`. Invalid noise or initial covariances return
+`invalid_problem`; nonfinite outputs or
 loss of positive semidefiniteness return `numerical_failure`. Sampled-model
 integration failures retain their backend status, including iteration limits.
 Shape/configuration errors raise immediately.
 
 `throw=False` returns these diagnostics. With `throw=True`, failure raises
 during execution, including under `jit` when the caller selects only a state
-field. Covariance checks use dtype-scaled roundoff tolerances and never repair
-the covariance. Status decisions are nondifferentiable; objectives on states,
+field. Covariance validation uses dtype-scaled roundoff tolerances. Status
+decisions are nondifferentiable; objectives on states,
 covariances and likelihoods retain their transform contracts.
 
 Use the one-step helpers when measurements arrive in a runtime loop or when the
@@ -469,14 +469,12 @@ measurement-update gain used by `kalman_update()`.
 `rts()` requires the same `Q` used by the forward `kalman()` pass so the
 smoother uses the same process model. Pass zeros for deterministic dynamics.
 
-`mhe_objective()` is the lowest-level optimization-based estimator surface in
-the library. `mhe()` is a thin solver wrapper, not a full nonlinear
-programming framework.
+`mhe_objective()` exposes the fixed-window cost directly. `mhe()` minimizes it
+with a configured optimizer and returns convergence diagnostics.
 
 ## Diagnostics
 
-Contrax now includes a lightweight diagnostics layer for routine estimation
-health checks:
+Estimation diagnostics summarize routine filter and smoother health:
 
 - `innovation_diagnostics(innovations, innovation_covariances)` computes
   per-step normalized innovation squared (NIS), innovation norms, and
@@ -494,14 +492,12 @@ health checks:
   correction magnitudes, and PSD health of the smoothed covariances.
   Accepts `RTSResult` paired with either `KalmanResult` or `UKFResult`.
 
-These helpers are intentionally honest and lightweight. They are good for
-filter tuning, regression checks, and notebook-free workflow validation, but
-they are not a substitute for a full statistical consistency study.
+Use these summaries for filter tuning and regression checks. Statistical
+consistency still depends on the model, noise assumptions, and data.
 
 ## Parameterization Helpers
 
-Contrax also exposes a small constrained-parameterization layer for estimation
-and tuning workflows:
+Constrained-parameterization helpers support estimation and tuning workflows:
 
 - `positive_exp(raw)` and `positive_softplus(raw)` map unconstrained values to
   positive ones
@@ -520,7 +516,7 @@ diagonal participates in dtype promotion, so fractional entries are retained.
 Positive definiteness holds in exact arithmetic. With a zero floor, very negative
 parameters can underflow to zero; exponential overflow and ill-conditioned
 Cholesky factors can also defeat floating-point definiteness. The helpers apply
-the requested transform without clipping or covariance repair.
+the requested transform directly.
 
 ## Related Pages
 

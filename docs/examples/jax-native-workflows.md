@@ -1,10 +1,7 @@
 # JAX-Native Workflows
 
-This page collects the main workflow patterns Contrax supports well.
-
-If you are new to the project, read [Differentiable LQR](../tutorials/differentiable-lqr.md)
-first. That page is the clearest end-to-end example. This page is the broader
-pattern map.
+These examples show differentiable controller design, batched linearization,
+compiled simulation, and nonlinear estimation workflows.
 
 Runnable scripts:
 
@@ -15,8 +12,7 @@ Runnable scripts:
 - `examples/continuous_nonlinear_estimation.py`
 - `examples/structured_nonlinear_estimation.py`
 
-Use this page as a bridge between the high-level tutorials and the namespace
-reference pages:
+Related API pages:
 
 - [Systems](../api/systems.md)
 - [Control](../api/control.md)
@@ -46,16 +42,16 @@ def objective(q_diag, log_r):
     Q = jnp.diag(q_diag)
     R = jnp.exp(log_r)[None, None]
     K = cx.lqr(sys, Q, R).K
-    _, xs, _ = cx.simulate(sys, x0, lambda t, x: -K @ x, num_steps=80)
-    return jnp.sum(xs**2)
+    trajectory = cx.simulate(sys, x0, lambda t, x: -K @ x, num_steps=80)
+    return jnp.sum(trajectory.xs**2)
 
 
 objective_and_grad = jax.jit(jax.value_and_grad(objective, argnums=(0, 1)))
 cost, (dq, dlog_r) = objective_and_grad(jnp.ones(2), jnp.array(0.0))
 ```
 
-That makes weight tuning feel like normal JAX optimization rather than a
-separate controller-design step.
+The objective differentiates through controller design and simulation as one
+JAX computation.
 
 Related pages:
 - [Tune LQR with gradients](../how-to/tune-lqr-with-gradients.md)
@@ -133,8 +129,8 @@ batched_design = jax.jit(jax.vmap(design))
 Ks = batched_design(x_eqs, u_eqs)
 ```
 
-This is a natural starting point for gain scheduling, operating-point sweeps,
-or controller redesign over a grid.
+Use the batched design for gain scheduling, operating-point sweeps, or controller
+redesign over a grid.
 
 Related pages:
 - [Batch controller design](../how-to/batch-controller-design.md)
@@ -173,11 +169,9 @@ part of the workflow into a separate control toolbox.
 
 ## 5. Estimate Continuous Nonlinear Systems On A Discrete Grid
 
-The newer estimation surface is meant to keep continuous plant models inside the
-same JAX program as recursive estimation. `sample_system()` builds a discrete
-transition map by integrating the continuous dynamics over one sample interval,
-and `foh_inputs()` lets that bridge see first-order-hold inputs instead of a
-constant value inside each step.
+`sample_system()` integrates a continuous plant over each sample interval and
+returns a discrete transition map. Use `foh_inputs()` to provide
+first-order-hold endpoint pairs.
 
 Runnable scripts:
 - `examples/continuous_nonlinear_estimation.py`
@@ -191,13 +185,9 @@ Related pages:
 
 ## 6. Estimation And Optimization Live In The Same JAX World
 
-Contrax's estimation surface is also meant to compose with the same fixed-shape
-JAX workflows. Batch filters use scans, one-step helpers fit runtime loops, and
-MHE objective construction is written as an ordinary differentiable cost.
-
-That means the library is not only about classical LTI design; it is also
-aiming toward a broader systems-estimation-control workflow where filtering,
-smoothing, and trajectory fitting feel like neighboring tools.
+Batch filters use scans, one-step helpers fit runtime loops, and MHE objective
+construction provides a differentiable cost. These workflows share model and
+array conventions with LTI design.
 
 Related pages:
 - [Kalman filtering](../tutorials/kalman-filtering.md)
@@ -207,8 +197,9 @@ Related pages:
 
 ## 7. Cast Quadratic Optimal Execution As LQR
 
-Contrax is not a finance library, but some finance problems map cleanly onto
-standard control objects. A simple execution model is one of them.
+Quadratic execution models map naturally to standard control objects. This
+example represents remaining inventory as the state and signed inventory
+change as the control.
 
 Treat remaining inventory as the state and signed inventory change as the
 control:

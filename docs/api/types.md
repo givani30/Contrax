@@ -1,9 +1,7 @@
 # Types
 
-Contrax uses small `eqx.Module` result bundles for solver, simulation-adjacent,
-and estimator outputs. These types are part of the public API.
-
-Use them as named return values rather than unpacking by position:
+Result bundles expose named fields for solver, simulation, and estimator
+outputs. The public result types are:
 
 - [`SimResult`][contrax.types.SimResult] for `simulate()`, `lsim()`,
   `step_response()`, `impulse_response()`, and `initial_response()`
@@ -29,8 +27,7 @@ Use them as named return values rather than unpacking by position:
 
 ## Why Result Bundles Exist
 
-The result types are not decorative wrappers. They are part of the numerical
-workflow design:
+The result bundles provide stable field names and remain JAX pytrees:
 
 - they make multi-output solver contracts explicit
 - they keep field names stable across tutorials, examples, and compiled code
@@ -50,12 +47,12 @@ An empty trajectory has no final state: accessing `.final_state` raises
 
 Online prediction helpers return `FilterPredictionResult` with `.x` and `.P`;
 updates and combined steps return `FilterUpdateResult`, which also exposes
-`.innovation`. Both support tuple unpacking and `.status` / `.successful`.
+`.innovation`. Both include `.status` and `.successful`.
 Batch filter and smoother bundles expose the same status properties. Their
-covariance checks assess symmetry and positive semidefiniteness without repair.
+covariance validation checks symmetry and positive semidefiniteness.
 
 Simulation exposes `.state_times` aligned with `.xs` and `.output_times`
-aligned with `.ys`. `.ts` is the output-time vector used by tuple unpacking.
+aligned with `.ys`; `.ts` aliases `.output_times`.
 
 `LQRResult.closed_loop` and `KalmanGainResult.closed_loop` retain the designed
 error/feedback transition matrices. Their `.poles` properties evaluate
@@ -86,6 +83,6 @@ eigenvalues are not provided by JAX.
 
 - [Control](control.md) for [`LQRResult`][contrax.types.LQRResult]
 - [Estimation](estimation.md) for the Kalman-family and MHE result bundles
-- [Systems](systems.md) for the structured-system diagnostics surface
+- [Systems](systems.md) for structured-system diagnostics
 
 ::: contrax.types

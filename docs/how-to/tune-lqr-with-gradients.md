@@ -23,9 +23,9 @@ def closed_loop_cost(log_q_diag, log_r):
     Q = jnp.diag(jnp.exp(log_q_diag))
     R = jnp.exp(log_r)[None, None]
     K = cx.lqr(sys, Q, R).K
-    _, xs, _ = cx.simulate(sys, x0, lambda t, x: -K @ x, num_steps=80)
-    control_energy = jnp.sum((xs[:-1] @ K.T) ** 2)
-    return jnp.sum(xs**2) + 1e-2 * control_energy
+    trajectory = cx.simulate(sys, x0, lambda t, x: -K @ x, num_steps=80)
+    control_energy = jnp.sum((trajectory.xs[:-1] @ K.T) ** 2)
+    return jnp.sum(trajectory.xs**2) + 1e-2 * control_energy
 
 
 objective_and_grad = jax.jit(jax.value_and_grad(closed_loop_cost, argnums=(0, 1)))
@@ -70,7 +70,7 @@ unconstrained parameters $\theta_Q$ and $\theta_R$.
 
 ## Key Choices
 
-- Use the discrete path first when you want the cleanest gradient story.
+- Start with discrete LQR for the best-covered gradient path.
 - Keep the objective scalar and fixed-shape.
 - Inspect `LQRResult.residual_norm` on unfamiliar systems if solver quality is
   part of the optimization logic.

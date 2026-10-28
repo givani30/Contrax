@@ -29,17 +29,15 @@ state $(\theta, \dot\theta)$ and $b$ jointly from angle measurements alone.
 --8<-- "examples/nonlinear_mhe.py:model"
 ```
 
-The key design pattern is **parameter augmentation**: $b$ is lifted into the
-state vector as $b_\text{raw}$ with identity dynamics (random-walk model), and
-the physical value is recovered inside the model via
+The model augments the state with $b_\text{raw}$ using identity dynamics
+(random-walk model), then recovers the physical parameter with
 
 $$
 b = \text{softplus}(b_\text{raw}) > 0.
 $$
 
-This keeps the MHE objective unconstrained everywhere. The optimizer explores
-all of $\mathbb{R}$ in $b_\text{raw}$ space and the constraint $b > 0$ is
-enforced structurally, not by an inequality constraint or a projection step.
+The softplus map keeps $b > 0$ for every raw parameter value, so the optimizer
+works over unconstrained $b_\text{raw}$ values.
 
 ## Solving MHE
 
@@ -59,13 +57,12 @@ The script reports convergence, status, gradient norm, final cost, estimated
 damping and terminal angle alongside the ground truth. It also checks positive
 damping and terminal-angle accuracy.
 
-The angle estimate is close to ground truth. The damping estimate is biased
-because a 12-step window with a slowly-varying random-walk prior is a
-short identification horizon for a single scalar parameter — longer windows
-or a tighter prior on $b_\text{raw}$ dynamics improve convergence. The
-`solver_converged=False` flag means convergence was not established. The finite
-accepted estimate may still be useful, but inspect status, gradient norm and
-cost reduction before using it or interpreting implicit gradients.
+The angle estimate is close to ground truth. The damping estimate is biased:
+a 12-step window with a slowly varying random-walk prior gives a short
+identification horizon for one scalar parameter. Longer windows or a tighter
+prior on $b_\text{raw}$ dynamics may improve the estimate. Here
+`solver_converged=False`; inspect status, gradient norm, and cost reduction
+before using the estimate or interpreting implicit gradients.
 
 ## Related Pages
 

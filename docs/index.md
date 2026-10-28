@@ -4,15 +4,14 @@ Contrax is a JAX-native systems, control, simulation, and estimation library
 with MATLAB-familiar names at the API surface and JAX-first behavior
 underneath.
 
-The core idea is simple: controller design should live in the same JAX program
-as the rest of the model. Linearization, simulation, batching, and
-differentiation should compose instead of being split across separate tools.
+Controller design can run in the same JAX program as the model. Linearization,
+simulation, batching, and differentiation compose in one workflow.
 
 <div class="contrax-status-strip" markdown="1">
 
 - `dare` is the most mature Riccati solver path in the library
 - `care` is supported and validated, but less benchmarked than `dare`
-- continuous `simulate()` uses Diffrax behind a narrow Contrax-shaped surface
+- continuous `simulate()` uses Diffrax and returns values on a fixed save grid
 
 </div>
 
@@ -20,11 +19,10 @@ differentiation should compose instead of being split across separate tools.
 
 <figure class="contrax-figure">
   <img src="/assets/images/control-loop-overview.svg"
-       alt="Closed-loop overview showing controller, plant, estimator, and the Contrax workflow around them" />
+       alt="Closed-loop overview showing controller, plant, estimator, and their shared state-space model" />
   <figcaption>
-    <strong>The core Contrax idea:</strong> keep the model, controller design,
-    simulation, and estimator on one shared state-space story instead of
-    splitting them across separate tools.
+    <strong>One shared model:</strong> use the same state-space description for
+    controller design, simulation, and estimation.
   </figcaption>
 </figure>
 
@@ -65,20 +63,20 @@ def closed_loop_cost(log_q_diag, log_r):
     Q = jnp.diag(jnp.exp(log_q_diag))
     R = jnp.exp(log_r)[None, None]
     K = cx.lqr(SYS, Q, R).K
-    _, xs, _ = cx.simulate(SYS, X0, lambda t, x: -K @ x, num_steps=80)
-    return jnp.sum(xs**2)
+    trajectory = cx.simulate(SYS, X0, lambda t, x: -K @ x, num_steps=80)
+    return jnp.sum(trajectory.xs**2)
 
 
 objective_and_grad = jax.jit(jax.value_and_grad(closed_loop_cost, argnums=(0, 1)))
 cost, grads = objective_and_grad(jnp.zeros(2), jnp.array(0.0))
 ```
 
-That is the central Contrax story: control primitives that behave like ordinary
-JAX building blocks instead of sealed-off toolbox calls.
+Control design, simulation, and estimation use JAX arrays and transformations
+throughout the workflow.
 
-Contrax is deliberately focused. It is not trying to be a plotting-heavy
-controls environment or a full MATLAB clone. It is trying to make the most
-useful systems-and-control workflows feel native inside JAX.
+Contrax focuses on systems, control, simulation, and estimation workflows in
+JAX. The optional `python-control` bridge supports conversion of LTI
+state-space models.
 
 ## Core Equations
 
@@ -88,7 +86,7 @@ useful systems-and-control workflows feel native inside JAX.
 
 ### Model Families
 
-Contrax keeps the familiar control-theory objects visible in the docs and API.
+These equations describe common linear, nonlinear, and port-Hamiltonian models.
 
 $$
 \dot{x} = A x + B u, \qquad y = C x + D u
@@ -199,13 +197,8 @@ $$
 
 </div>
 
-## Scope And Honesty
+## Solver Guidance
 
-Contrax is explicit about what it is and is not.
-
-It is a systems-and-control library for JAX-first workflows. It is not a
-plotting package, not a Simulink-style environment, and not a library that
-hides solver maturity behind a larger API surface.
-
-Important solver caveats, transform contracts, and validation expectations are
-part of the docs because they are part of the product.
+Solver maturity, transform behavior, and numerical assumptions are documented
+alongside each workflow. The discrete Riccati path has the broadest benchmark
+coverage; CARE is supported and validated with less benchmark coverage.

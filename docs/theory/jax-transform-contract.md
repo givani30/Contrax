@@ -1,23 +1,19 @@
 # JAX Transform Contract
 
-Contrax is not only a control library. It is a control library designed to
-behave predictably under JAX transforms.
-
-That means public APIs should be explicit about `jit`, `vmap`, and `grad`
-behavior rather than treating transforms as an implementation detail.
+JAX transform behavior is part of the public contract. APIs document how they
+compose with `jit`, `vmap`, and `grad` when those details affect use.
 
 ## Core Idea
 
-In Contrax, transform behavior is part of the feature contract. A solver or
-simulation helper is judged not only by its forward result, but also by how it
-behaves inside `jit`, under batching, and inside differentiable objectives.
+Assess a solver or simulation helper by its forward result and by its behavior
+under compilation, batching, and differentiation.
 
 ## `jit`
 
 Functions intended for compiled use should avoid Python control flow over JAX
 runtime values and should keep traced computation inside JAX primitives.
 
-For Contrax, that especially matters in:
+This matters especially in:
 
 - time loops for simulation and filtering
 - iterative solver paths
@@ -42,7 +38,7 @@ Important distinctions include:
 - native forward/reverse derivatives through algebraic primitives
 - implicit differentiation through a fixed-point or Riccati solve
 
-If a public function does not compose well with `grad`, the docs should say so.
+Document limitations when a public function cannot compose with `grad`.
 
 In practice, the important distinction is simple:
 
@@ -50,9 +46,8 @@ In practice, the important distinction is simple:
 \text{forward solve} \neq \text{backward contract}
 \]
 
-A method can be numerically acceptable in forward mode and still be a poor fit
-for differentiation if the backward pass requires unrolling unstable
-iterations, leaves the JAX execution model, or creates the wrong memory story.
+A method can produce an acceptable forward result while its derivative path
+unrolls unstable iterations, leaves JAX, or uses excessive memory.
 
 ## Practical Design Rules
 
@@ -66,20 +61,20 @@ iterations, leaves the JAX execution model, or creates the wrong memory story.
 
 The main expectations are:
 
-- Contrax does not mutate `jax_enable_x64` on import; precision-sensitive
-  solvers raise a clear error unless users opt into float64 explicitly
+- Importing the package leaves `jax_enable_x64` unchanged; precision-sensitive
+  solvers require users to enable float64 explicitly
 - discrete and continuous LTI `lsim()` support fixed-shape `jit`, `vmap`, JVP
   and VJP; continuous calls require an explicit sample grid and hold convention
 - `simulate()` uses `num_steps` for discrete systems and `duration` for
   continuous systems so horizon semantics stay explicit
-- continuous `simulate()` returns values on a fixed save grid rather than
-  exposing adaptive internal solver steps directly
+- continuous `simulate()` returns values on a fixed save grid; adaptive
+  internal solver steps remain internal
 - simulation results expose backend status and integration step counts;
   `throw=True` checks failures even when compiled code consumes just one field
 - continuous simulation defaults to a checkpoint adjoint for reverse losses;
   sampled models default to a direct adjoint for forward state Jacobians
-- `step_response()` and `impulse_response()` are analysis helpers; they are
-  not the preferred path for gradients with respect to nonsmooth event timing
+- `step_response()` and `impulse_response()` use fixed event times; gradients
+  with respect to event timing require a smooth input parameterization
 - `lqr()` on the discrete path supports finite gradients through representative
   objectives
 - Riccati and Lyapunov solvers support implicit JVP and VJP without unrolling
@@ -88,22 +83,6 @@ The main expectations are:
   intended use case
 - `place()` is a design-time helper: its numerical core is JAX-native, but
   method selection and fallback logic use ordinary Python dispatch
-
-The docs should treat these transform contracts as part of the feature, not as
-optional extra detail.
-
-## Documentation Structure
-
-The docs structure mirrors the transform story:
-
-- tutorials show a full end-to-end success path
-- how-to guides isolate a single practical task
-- API pages record exact argument, shape, and return conventions
-- theory pages explain the why behind the public contracts
-
-That split matters for a JAX-native numerical library because transform
-behavior is easy to accidentally hide if the docs only show signatures or only
-show polished tutorials.
 
 ## Validation
 

@@ -1,14 +1,14 @@
 # Riccati Solvers
 
-Riccati solvers sit at the center of Contrax's control story. They are also one
-of the places where "JAX-native" really matters, because a solver can look fine
-in forward mode but behave badly under `grad`, `jit`, or GPU execution.
+Riccati solvers turn infinite-horizon LQR problems into algebraic equations.
+Their implementation must also support the required JAX compilation and
+differentiation paths.
 
 ## LQR Setup
 
 Riccati solvers are the numerical core behind linear-quadratic regulator
-design. In Contrax they matter as both forward solvers and differentiable JAX
-primitives.
+design. They provide both the forward solution and the differentiable map used
+inside controller-design objectives.
 
 For the discrete-time model
 
@@ -53,15 +53,14 @@ solver calls.
   <img src="/assets/images/lqr-riccati-workflow.svg"
        alt="Riccati-backed LQR design workflow from plant and weights to dare or care, gain recovery, and closed-loop checks" />
   <figcaption>
-    <strong>The solver story in one picture:</strong> the Riccati solve is not
-    an isolated matrix trick; it is the map from plant plus weights to the
-    gain and closed-loop diagnostics used by the rest of the control surface.
+    <strong>Riccati design:</strong> map the plant and cost weights to a gain,
+    then inspect the closed-loop diagnostics.
   </figcaption>
 </figure>
 
 ## Riccati Equations
 
-Contrax implements the stabilizing algebraic Riccati solves behind LQR:
+The stabilizing algebraic Riccati equations used by LQR are:
 
 $$
 A^\top S A - S - A^\top S B \left(R + B^\top S B\right)^{-1} B^\top S A + Q = 0
@@ -103,22 +102,19 @@ Their maturity differs:
 - `care()` is a validated continuous-time solver, but still less benchmarked
   than `dare()`
 
-In the docs structure, that means:
-
-- the [Control API](../api/control.md) records the callable contract
-- tutorials show the solver inside full workflows
-- this page explains why the solver choices look the way they do
+See the [Control API](../api/control.md) for call signatures and the tutorials
+for complete design workflows.
 
 ## Discrete Riccati: `dare()`
 
-Contrax uses a structured-doubling forward solve for the discrete
-algebraic Riccati equation.
+`dare()` solves the discrete algebraic Riccati equation with structured
+doubling.
 
 At the control level, that means `dare()` is the numerical heart of discrete
 `lqr()`: solve for `S`, recover `K_d`, then inspect the poles of
 $A_{\mathrm{cl},d}$.
 
-The main goals of that implementation are:
+The solver provides:
 
 - robust forward solves on the existing benchmark slice
 - residual and closed-loop pole validation
@@ -129,9 +125,9 @@ The backward pass solves the adjoint discrete Lyapunov equation for the
 converged Riccati solution and then lets gain computation differentiate from
 that solution. Both Riccati adjoints share the public Lyapunov equation kernel:
 residual-validated squared Smith iteration, with a Cayley transform for the
-continuous equation. Automatic dense fallback is limited to eight states;
-large failed iterations return nonfinite gradients rather than allocating an
-unbounded Kronecker operator. The public Lyapunov routines additionally expose
+continuous equation. Automatic dense fallback is limited to eight states. For
+larger systems, failed iterations return nonfinite gradients; they do not
+switch to a dense Kronecker solve. The public Lyapunov routines also expose
 implicit forward-mode differentiation and an explicit general dense solver.
 
 The practical implication is that gradients with respect to `A`, `B`, `Q`, and
@@ -152,9 +148,8 @@ solve for `S`, recover `K_c`, then inspect the spectrum of
 $A_{\mathrm{cl},c}$.
 
 Reference: Laub (1979), "A Schur Method for Solving Algebraic Riccati
-Equations". Contrax follows the same stable-subspace idea but uses a JAX-native
-eigendecomposition path rather than a Schur-based LAPACK routine in the hot
-path.
+Equations". The implementation uses a JAX eigendecomposition to extract the
+stable subspace.
 
 Newton corrections solve a continuous Lyapunov equation for the CARE residual.
 A correction is accepted only if its residual decreases and the resulting
@@ -166,17 +161,17 @@ instead of assuming refinement guarantees success.
 
 ## Solver Selection And Schur-Based Methods
 
-In classical control software, Schur- or QZ-based methods are standard. In
-Contrax, the issue is not mathematical legitimacy. The issue is the execution
-story:
+Schur- and QZ-based methods are standard in classical control software. The
+JAX implementation uses methods that fit its execution model:
 
-- CPU-only decomposition paths are a bad fit for the intended JAX/GPU story
+- CPU-only decomposition paths do not run within compiled JAX and GPU workflows
 - a solver path that is numerically fine in forward mode may be a poor fit for
   differentiation
-- unrolling an iterative solver in the backward pass is the wrong memory story
+- unrolling an iterative solver in the backward pass can require excessive
+  memory
 
-That is why Contrax cares about both the forward algorithm and the backward
-contract.
+Both the forward algorithm and the derivative rule determine whether a solver
+fits a compiled design workflow.
 
 ## Failure Modes And Diagnostics
 
@@ -197,8 +192,7 @@ On unfamiliar systems, the minimum useful checks are:
 - agreement with Octave or SciPy on representative reference systems
 - finite gradients through small objectives involving `Q`, `R`, `A`, or `B`
 
-For the public discrete path, also treat benchmark coverage as part of solver
-maturity rather than as a separate research exercise.
+Benchmark coverage is part of assessing solver maturity.
 
 ## JAX Behavior
 
@@ -211,11 +205,11 @@ Both Riccati solvers are written to stay inside the JAX execution model:
 
 Gain and Riccati-solution Hessians have analytic scalar reference coverage,
 including a composed `c2d -> lqr` objective. Pole diagnostics are evaluated on
-access rather than during those objectives. Differentiating poles themselves
+access, so they do not enter those objectives. Differentiating poles themselves
 has the separate restrictions of JAX's nonsymmetric eigensolver.
 
-That makes both paths suitable for compiled controller-design objectives, with
-the usual caveat that conditioning and benchmark coverage still matter.
+Both paths can appear in compiled controller-design objectives; conditioning
+and benchmark coverage determine where they are suitable.
 
 ## Related Pages
 

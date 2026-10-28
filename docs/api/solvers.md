@@ -1,9 +1,9 @@
 # Solvers
 
-Contrax solver objects configure algorithm choices, tolerances and iteration
-limits. Ordinary calls use validated defaults; pass a keyword-only `solver=`
-to choose another algorithm. Diffrax and Optimistix objects retain their native
-interfaces in simulation and optimization.
+Solver objects configure algorithm choices, tolerances, and iteration limits.
+Calls use validated defaults unless a `solver=` is supplied. Diffrax and
+Optimistix objects retain their native interfaces in simulation and
+optimization.
 
 ```python
 import jax
@@ -31,7 +31,7 @@ compiled execution. They require float64 mode and use implicit JVP/VJP rules.
 `Kalman` and `EKF` configure covariance updates. Both default to Joseph form;
 compact form requires `covariance_update="compact"`. `EKF(num_iter=3)` enables
 iterated measurement linearization in online and batch estimators. Filtering
-preserves input precision and does not require float64 mode.
+supports float32 and float64 inputs and preserves their precision.
 
 `SteadyStateKalman(design)` explicitly reuses a `kalman_gain` result. Its gain
 and covariance are differentiable data. The initial predicted covariance
@@ -49,14 +49,9 @@ must be positive definite and all variances positive. Controls, masks,
 initialization defaults and differentiation follow ordinary Kalman filtering.
 
 `UKF(alpha=1, beta=2, kappa=0)` configures the scaled unscented transform.
-Sigma-point covariances and innovation covariances must be positive definite;
-no diagonal jitter is added. Missing observations skip the entire measurement
-transform and contribute zero log likelihood. The innovation Cholesky factor
-is reused for the gain and likelihood.
-
-```python
-design = cx.lqr(sys, Q, R, solver=cx.solvers.DARE(max_steps=64))
-```
+Sigma-point and innovation covariances must be positive definite. Missing
+observations skip the measurement transform and contribute zero log likelihood.
+The innovation Cholesky factor is reused for the gain and likelihood.
 
 `Lyapunov` supports stable doubling, general dense solves, and bounded automatic
 fallback. See [Analysis](analysis.md) and [Control](control.md) for equation

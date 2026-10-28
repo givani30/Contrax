@@ -1,9 +1,7 @@
 # Continuous LQR
 
-This tutorial shows the continuous-time control path on the double integrator.
-We will build a continuous state-space model, design an LQR controller through
-`care()`, simulate the closed loop with the Diffrax-backed continuous
-`simulate()` path, and finish with a small gradient check.
+Design continuous LQR for a double integrator, simulate the closed loop, and
+check a gradient through the design and simulation.
 
 ```text
 continuous state-space model -> care-backed lqr -> continuous simulate -> gradient smoke test
@@ -60,9 +58,7 @@ stability checks in eager and compiled execution. Inspect `result.successful`
 before using a design; `throw=True` requests checked failure. Closely spaced
 Hamiltonian subspaces can limit accuracy even after Newton refinement.
 
-That caveat matters for the docs structure too: continuous LQR is documented as
-a real supported workflow, but it is not presented as the most battle-tested
-slice of the library.
+CARE is supported and validated; DARE has broader benchmark coverage.
 
 ## Check That Gradients Stay Finite
 
@@ -84,7 +80,7 @@ Continuous LQR — double integrator
   K = [[1.         1.73205081]]
   closed-loop poles = [-0.8660254+0.5j -0.8660254-0.5j]
   all poles stable  = True
-  residual norm     = 1.776357e-15
+  residual norm     = 4.440892e-16
   x[0]  = [1. 0.]
   x[-1] = [-0.00023873  0.00033244]  (should be near zero)
   time horizon      = 10.000 s
@@ -95,9 +91,8 @@ Gradient smoke test (d/d(log q) of settling cost):
 All assertions passed.
 ```
 
-The exact gradient value is not the main takeaway. The useful checks are stable
-continuous-time poles, a small Riccati residual, state convergence toward zero,
-and a finite gradient through the end-to-end workflow.
+Check that the closed-loop poles are stable, the Riccati residual is small, the
+state converges toward zero, and the end-to-end gradient is finite.
 
 ## Validate The Result
 
