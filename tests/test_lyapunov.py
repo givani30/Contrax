@@ -14,18 +14,22 @@ from contrax.solvers import Lyapunov, SolverStatus
 
 
 @pytest.mark.parametrize("continuous", [False, True])
-def test_nonnormal_equation_matches_dense_and_transforms(continuous):
+@pytest.mark.parametrize("symmetric", [False, True])
+def test_nonnormal_equation_matches_dense_and_transforms(continuous, symmetric):
     A = jnp.array([[-0.4, 4.0], [0.0, -0.2]])
     if not continuous:
         A = A + jnp.eye(2)
     Q = jnp.array([[2.0, 0.3], [0.3, 1.0]])
+    if not symmetric:
+        Q = Q.at[0, 1].set(-0.7)
     solve = cx.lyap if continuous else cx.dlyap
     direct = solve(A, Q, solver=Lyapunov(method="dense"))
     result = jax.jit(lambda a, q: solve(a, q, solver=Lyapunov(method="doubling")))(A, Q)
     assert result.successful
     assert result.num_steps > 0
     np.testing.assert_allclose(result.X, direct.X, rtol=1e-9, atol=1e-9)
-    np.testing.assert_allclose(result.X, result.X.T, rtol=1e-12, atol=1e-12)
+    if symmetric:
+        np.testing.assert_allclose(result.X, result.X.T, rtol=1e-12, atol=1e-12)
 
     def loss(a, q):
         return jnp.sum(solve(a, q).X ** 2)
