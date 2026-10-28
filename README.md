@@ -6,7 +6,7 @@
 [![Docs](https://img.shields.io/badge/docs-online-teal)](https://givani30.github.io/Contrax/)
 [![PyPI](https://img.shields.io/pypi/v/contrax)](https://pypi.org/project/contrax/)
 [![Python](https://img.shields.io/pypi/pyversions/contrax)](https://pypi.org/project/contrax/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/givani30/Contrax/blob/master/LICENSE)
 
 Contrax is a JAX-native systems, estimation, and control toolbox.
 MATLAB-familiar names at the API surface — `ss`, `lqr`, `kalman`, `place` —
@@ -14,7 +14,7 @@ with `jit`, `vmap`, and `grad` behavior underneath.
 
 **[Documentation](https://givani30.github.io/Contrax/)** · [Getting started](https://givani30.github.io/Contrax/getting-started/) · [API reference](https://givani30.github.io/Contrax/api/systems/)
 
-![Differentiable LQR tuning loop](docs/assets/images/differentiable-lqr-loop.svg)
+![Differentiable LQR tuning loop](https://raw.githubusercontent.com/givani30/Contrax/master/docs/assets/images/differentiable-lqr-loop.svg)
 
 ---
 
@@ -27,6 +27,11 @@ pip install contrax
 Requires Python 3.11+ and JAX 0.9.2+. For GPU support, install JAX separately
 per the [JAX installation guide](https://jax.readthedocs.io/en/latest/installation.html)
 before installing Contrax.
+
+**Upgrading from 0.1.0?** Version 0.2.0 changes filter signatures, result fields,
+solver configuration and MHE indexing. Read the
+[breaking changes and migration notes](https://github.com/givani30/Contrax/blob/master/CHANGELOG.md#breaking-changes-and-migration-from-010)
+before updating callers.
 
 ## Why Contrax
 
@@ -111,7 +116,7 @@ X = result.X  # Check result.successful before using an unfamiliar equation.
 
 `lyap` and `dlyap` support implicit forward/reverse differentiation, stable-system
 doubling and explicit general dense solves. Automatic dense fallback is bounded
-to eight states. See [analysis](docs/api/analysis.md) for the equation and failure
+to eight states. See [analysis](https://givani30.github.io/Contrax/api/analysis/) for the equation and failure
 contracts.
 
 ## Solver Status
@@ -119,7 +124,7 @@ contracts.
 - **`dare`** — structured doubling with implicit JVP/VJP, scale-aware residual and stability checks.
 - **`care`** — Hamiltonian stable-subspace solve with accepted Newton corrections and implicit JVP/VJP. Closely separated subspaces can limit accuracy.
 - **`place`** — design-time KNV0/YT pole placement with achieved-assignment and conditioning checks, solver configuration, and bounded SISO fallback.
-- **`ekf` / `ukf` / `rts` / `uks`** — differentiable nonlinear filtering and smoothing with full JAX transform support.
+- **`ekf` / `ukf` / `rts` / `uks`** — linear and nonlinear filtering and smoothing with JIT, batching and differentiation support.
 - **`mhe`** — LBFGS-backed fixed-window MHE. Useful optimization-based estimation primitive; not a full NLP framework.
 
 LTI workflows are the most mature slice. Nonlinear models, PHS support, and
@@ -136,7 +141,7 @@ uv run pre-commit install
 uv run pytest tests/ -q
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
+See [CONTRIBUTING.md](https://github.com/givani30/Contrax/blob/master/CONTRIBUTING.md) for contribution guidelines.
 
 ## Acknowledgements
 
