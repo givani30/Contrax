@@ -48,7 +48,6 @@ def _doubling(A, Q, continuous, solver, max_steps=None):
         X = 2 * shift * jnp.linalg.solve(left, rhs.T).T
     else:
         transition, X = A, Q
-    symmetric = jnp.all(Q == Q.T)
     max_steps = solver.max_steps if max_steps is None else max_steps
 
     def condition(carry):
@@ -63,11 +62,7 @@ def _doubling(A, Q, continuous, solver, max_steps=None):
 
     def step(carry):
         steps, transition, X = carry
-        updated = X + transition @ X @ transition.T
-        # Congruence preserves symmetry analytically. Project roundoff back
-        # onto that subspace for symmetric forcing, especially for nonnormal A.
-        updated = jnp.where(symmetric, (updated + updated.T) * 0.5, updated)
-        return steps + 1, transition @ transition, updated
+        return steps + 1, transition @ transition, X + transition @ X @ transition.T
 
     steps, _, X = jax.lax.while_loop(condition, step, (0, transition, X))
     return X, steps
@@ -103,21 +98,27 @@ def _solve(A, Q, continuous, solver):
 
         def refine(carry):
             attempt, X, steps = carry
-            rhs = Q - _operator(A, X, continuous)
-            rhs = jnp.where(jnp.all(Q == Q.T), (rhs + rhs.T) * 0.5, rhs)
             correction, used = _doubling(
                 A,
-                rhs,
+                Q - _operator(A, X, continuous),
                 continuous,
                 solver,
                 max_steps=solver.max_steps - steps,
             )
-            candidate = X + correction
-            improves = (
-                _residual(A, Q, candidate, continuous)[0]
-                < _residual(A, Q, X, continuous)[0]
-            )
-            return attempt + 1, jnp.where(improves, candidate, X), steps + used
+
+            # Near the rounding floor a full correction may overshoot. Try
+            # damped corrections before spending another doubling solve on
+            # the same residual (Higham, ch. 12, iterative refinement).
+            def damp(i, best):
+                candidate = X + (0.5**i) * correction
+                improves = (
+                    _residual(A, Q, candidate, continuous)[0]
+                    < _residual(A, Q, best, continuous)[0]
+                )
+                return jnp.where(improves, candidate, best)
+
+            best = jax.lax.fori_loop(0, 5, damp, X)
+            return attempt + 1, best, steps + used
 
         _, X, steps = jax.lax.while_loop(needs_refinement, refine, (0, X, steps))
         residual, scale = _residual(A, Q, X, continuous)
