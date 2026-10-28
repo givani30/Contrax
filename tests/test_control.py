@@ -31,6 +31,47 @@ C_CONT = jnp.array([[0.0, 0.0, 0.4]])
 D_CONT = jnp.zeros((1, 1))
 
 
+def test_dare_nonnormal_32_state_rollout_sensitivity():
+    """Revision benchmark regression; SciPy ARE/Lyapunov give an independent JVP.
+
+    For fixed A,B, dS-F.T@dS@F=dQ+K.T@dR@K and
+    dK=solve(R+B.T@S@B, B.T@dS@F-dR@K). No convergence-loop AD.
+    """
+    import scipy.linalg as sla
+
+    n = 32
+    A = jnp.diag(jnp.linspace(0.965, 0.997, n)) + 0.45 * jnp.diag(jnp.ones(n - 1), 1)
+    B = jnp.zeros((n, 2)).at[-1, 0].set(1).at[n // 2, 1].set(1)
+    Q, R = 0.2 * jnp.eye(n), jnp.eye(2)
+    weights = jnp.concatenate((jnp.full(n, jnp.log(0.2)), jnp.zeros(2)))
+    direction = jnp.linspace(-0.7, 0.9, n + 2)
+
+    def cost(K, Q, R):
+        def step(x, _):
+            u = -K @ x
+            return A @ x + B @ u, x @ Q @ x + u @ R @ u
+
+        return jnp.sum(jax.lax.scan(step, jnp.ones(n), None, length=80)[1])
+
+    def objective(w):
+        q, r = jnp.diag(jnp.exp(w[:n])), jnp.diag(jnp.exp(w[n:]))
+        return cost(cx.dare(A, B, q, r).K, q, r)
+
+    S = sla.solve_discrete_are(A, B, Q, R)
+    K = np.linalg.solve(R + B.T @ S @ B, B.T @ S @ A)
+    F = A - B @ K
+    dQ, dR = jnp.diag(0.2 * direction[:n]), jnp.diag(direction[n:])
+    dS = sla.solve_discrete_lyapunov(np.asarray(F.T), dQ + K.T @ dR @ K)
+    dK = np.linalg.solve(R + B.T @ S @ B, B.T @ dS @ F - dR @ K)
+    _, expected = jax.jvp(cost, (jnp.asarray(K), Q, R), (jnp.asarray(dK), dQ, dR))
+    _, forward = jax.jit(lambda w, d: jax.jvp(objective, (w,), (d,)))(
+        weights, direction
+    )
+    reverse = jax.jit(jax.grad(objective))(weights) @ direction
+    assert cx.dare(A, B, Q, R).successful
+    np.testing.assert_allclose([forward, reverse], expected, rtol=1e-6)
+
+
 @pytest.fixture
 def disc_sys():
     sys = cx.ss(A_CONT, B_CONT, C_CONT, D_CONT)

@@ -35,7 +35,7 @@ def _dense(A, Q, continuous):
     return jnp.linalg.solve(matrix, Q.reshape(-1)).reshape(Q.shape)
 
 
-def _doubling(A, Q, continuous, solver):
+def _doubling(A, Q, continuous, solver, max_steps=None):
     # Reference: Smith (1968), "Matrix equation XA + BX = C", SIAM J. Appl.
     # Math. Squared Smith iteration sums 2**k terms in k steps. The Cayley
     # transform maps a Hurwitz continuous equation to a Schur-stable one.
@@ -48,13 +48,15 @@ def _doubling(A, Q, continuous, solver):
         X = 2 * shift * jnp.linalg.solve(left, rhs.T).T
     else:
         transition, X = A, Q
+    max_steps = solver.max_steps if max_steps is None else max_steps
 
     def condition(carry):
-        steps, _, X = carry
+        steps, transition, X = carry
         residual, scale = _residual(A, Q, X, continuous)
         return (
-            (steps < solver.max_steps)
+            (steps < max_steps)
             & jnp.all(jnp.isfinite(X))
+            & jnp.any(transition != 0)
             & (residual > solver.atol + solver.rtol * scale)
         )
 
@@ -79,6 +81,38 @@ def _solve(A, Q, continuous, solver):
             lambda: _doubling(A, Q, continuous, solver),
             lambda: (jnp.full_like(Q, jnp.nan), jnp.asarray(0)),
         )
+
+        # Squaring a nonnormal transition accumulates rounding error even after
+        # its powers vanish. Iterative refinement solves the original residual
+        # equation (Higham, Accuracy and Stability, ch. 12), without a Kronecker
+        # fallback or a relaxed acceptance tolerance. All solves share the budget.
+        def needs_refinement(carry):
+            attempt, X, steps = carry
+            residual, scale = _residual(A, Q, X, continuous)
+            return (
+                (attempt < 4)
+                & (steps < solver.max_steps)
+                & jnp.isfinite(residual)
+                & (residual > solver.atol + solver.rtol * scale)
+            )
+
+        def refine(carry):
+            attempt, X, steps = carry
+            correction, used = _doubling(
+                A,
+                Q - _operator(A, X, continuous),
+                continuous,
+                solver,
+                max_steps=solver.max_steps - steps,
+            )
+            candidate = X + correction
+            improves = (
+                _residual(A, Q, candidate, continuous)[0]
+                < _residual(A, Q, X, continuous)[0]
+            )
+            return attempt + 1, jnp.where(improves, candidate, X), steps + used
+
+        _, X, steps = jax.lax.while_loop(needs_refinement, refine, (0, X, steps))
         residual, scale = _residual(A, Q, X, continuous)
         good = (
             jnp.isfinite(residual)
@@ -131,9 +165,9 @@ def lyapunov(A, Q, *, continuous, solver=None, throw=False):
 
     For continuous time, solves ``A X + X A.T + Q = 0``. For discrete time,
     solves ``X - A X A.T = Q``. The default `Lyapunov` configuration uses
-    squared Smith doubling and permits a bounded dense fallback for small
-    systems. Dense mode handles any uniquely solvable equation but requires
-    O(n**4) storage and O(n**6) work.
+    squared Smith doubling with residual refinement and permits a bounded
+    dense fallback for small systems. Dense mode handles any uniquely solvable
+    equation but requires O(n**4) storage and O(n**6) work.
 
     The doubling method requires a Hurwitz continuous-time matrix or a
     Schur-stable discrete-time matrix. The equation uses real matrices and

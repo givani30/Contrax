@@ -33,7 +33,7 @@ class Lyapunov(eqx.Module):
         method: ``auto``, ``doubling``, or ``dense``.
         rtol: Scale-aware equation residual tolerance.
         atol: Absolute equation residual tolerance.
-        max_steps: Maximum doubling steps.
+        max_steps: Maximum doubling steps, including residual correction solves.
         dense_limit: Largest state dimension allowed for automatic fallback.
     """
 

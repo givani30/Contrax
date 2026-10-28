@@ -126,6 +126,9 @@ converged Riccati solution and then lets gain computation differentiate from
 that solution. Both Riccati adjoints share the public Lyapunov equation kernel:
 residual-validated squared Smith iteration, with a Cayley transform for the
 continuous equation. Automatic dense fallback is limited to eight states. For
+stable nonnormal systems, residual corrections refine a stagnated doubling
+solution within the same iteration budget and without relaxing its tolerance.
+The reported Lyapunov iteration count includes these correction solves. For
 larger systems, failed iterations return nonfinite gradients; they do not
 switch to a dense Kronecker solve. The public Lyapunov routines also expose
 implicit forward-mode differentiation and an explicit general dense solver.
