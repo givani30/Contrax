@@ -5,7 +5,7 @@ import jax
 import jax.numpy as jnp
 
 
-def covariance_valid(matrix, *, strict=False):
+def covariance_valid(matrix, *, strict=False, cholesky=False):
     matrix = jnp.asarray(matrix, dtype=jnp.result_type(matrix, 1.0))
     matrix = jax.lax.stop_gradient(matrix)
     finite = jnp.all(jnp.isfinite(matrix), axis=(-2, -1))
@@ -16,9 +16,43 @@ def covariance_valid(matrix, *, strict=False):
         jnp.max(jnp.abs(safe - jnp.swapaxes(safe, -1, -2)), axis=(-2, -1), initial=0)
         <= tolerance
     )
-    eigenvalues = jnp.linalg.eigvalsh((safe + jnp.swapaxes(safe, -1, -2)) / 2)
-    smallest = jnp.min(eigenvalues, axis=-1, initial=jnp.inf)
-    return finite & symmetric & (smallest > 0 if strict else smallest >= -tolerance)
+    sym = (safe + jnp.swapaxes(safe, -1, -2)) / 2
+
+    def spectral(matrix=sym, tol=tolerance):
+        eigenvalues = jnp.linalg.eigvalsh(matrix)
+        smallest = jnp.min(eigenvalues, axis=-1, initial=jnp.inf)
+        return smallest > 0 if strict else smallest >= -tol
+
+    if cholesky and matrix.shape[-1] > 0:
+        # Positive-definite trajectories need only a factorization. Preserve
+        # the spectral PSD tolerance for singular or indefinite covariances;
+        # this branch validates the supplied matrix without adding jitter.
+        factor = jnp.linalg.cholesky(sym)
+        positive = jnp.all(jnp.isfinite(factor), axis=(-2, -1))
+
+        def mixed():
+            def one(args):
+                covariance, tol, pd = args
+                return jax.lax.cond(
+                    pd, lambda: jnp.asarray(True), lambda: spectral(covariance, tol)
+                )
+
+            n = matrix.shape[-1]
+            # lax.map keeps each conditional scalar: vmap would evaluate the
+            # eigensolve for every matrix when any factorization fails.
+            return jax.lax.map(
+                one,
+                (sym.reshape(-1, n, n), tolerance.reshape(-1), positive.reshape(-1)),
+            ).reshape(positive.shape)
+
+        valid = jax.lax.cond(
+            jnp.all(positive),
+            lambda: positive,
+            lambda: jax.lax.cond(jnp.any(positive), mixed, spectral),
+        )
+    else:
+        valid = spectral()
+    return finite & symmetric & valid
 
 
 def input_status(*covariances):
@@ -28,9 +62,9 @@ def input_status(*covariances):
     return jnp.where(valid, 0, 2)
 
 
-def state_status(x, P, solver_status, *, trajectory=False):
+def state_status(x, P, solver_status, *, trajectory=False, cholesky=False):
     finite = jnp.all(jnp.isfinite(x), axis=-1)
-    valid = covariance_valid(P)
+    valid = covariance_valid(P, cholesky=cholesky)
     if trajectory:
         finite, valid = jnp.all(finite, axis=-1), jnp.all(valid, axis=-1)
     return jnp.where(solver_status != 0, solver_status, jnp.where(finite & valid, 0, 3))

@@ -95,9 +95,25 @@ def test_float64_mode_is_required_without_global_mutation():
 
 
 def test_riccati_adjoint_large_nonnormal_equation():
+    from contrax._lyapunov import _doubling, _residual
     from contrax._riccati import _solve_adjoint_discrete_lyapunov
 
-    n = 16
-    A = 0.6 * jnp.eye(n) + 0.3 * jnp.diag(jnp.ones(n - 1), 1)
+    n = 32
+    transition = jnp.diag(jnp.linspace(0.965, 0.997, n)) + 0.45 * jnp.diag(
+        jnp.ones(n - 1), 1
+    )
+    B = jnp.zeros((n, 2)).at[-1, 0].set(1).at[n // 2, 1].set(1)
+    design = cx.dare(transition, B, 0.2 * jnp.eye(n), jnp.eye(2))
+    A = design.closed_loop.T
+    raw, _ = _doubling(A, jnp.eye(n), False, Lyapunov())
+    result = jax.jit(cx.dlyap)(A, jnp.eye(n))
+    assert result.successful
+    assert result.num_steps <= Lyapunov().max_steps
+    assert result.residual_norm < _residual(A, jnp.eye(n), raw, False)[0] * 1e-3
     X = jax.jit(_solve_adjoint_discrete_lyapunov)(A, jnp.eye(n))
-    np.testing.assert_allclose(X - A @ X @ A.T, jnp.eye(n), atol=1e-9)
+    # Symmetrization and separate compiled solves round differently in this
+    # strongly nonnormal realization; assess the matrix-scale error.
+    assert jnp.linalg.norm(X - result.X) <= 1e-8 * jnp.linalg.norm(result.X)
+    limited = cx.dlyap(A, jnp.eye(n), solver=Lyapunov(max_steps=16))
+    assert limited.num_steps <= 16
+    assert not limited.successful

@@ -340,6 +340,35 @@ def test_rts_shapes_and_terminal_state_matches_filter():
     assert jnp.allclose(smoothed.Ps[-1], kf.Ps[-1])
 
 
+def test_rts_validation_preserves_singular_psd_and_failure_status():
+    """The PD fast check must retain the spectral PSD and failure contracts."""
+    from contrax._filter_checks import covariance_valid
+
+    matrices = jnp.array(
+        [
+            [[1.0, 0.2], [0.2, 2.0]],
+            [[1.0, 0.0], [0.0, 0.0]],
+            [[1.0, 0.0], [0.0, -1e-3]],
+            [[1.0, 0.1], [0.0, 1.0]],
+            [[jnp.nan, 0.0], [0.0, 1.0]],
+        ]
+    )
+    spectral = jax.jit(covariance_valid)(matrices)
+    fast = jax.jit(lambda p: covariance_valid(p, cholesky=True))(matrices)
+    assert jnp.array_equal(fast, spectral)
+    assert jnp.array_equal(fast, jnp.array([True, True, False, False, False]))
+    sys = _scalar_sys()
+    filtered = cx.kalman(sys, jnp.zeros((3, 1)), Q=jnp.zeros((1, 1)), R=jnp.eye(1))
+    invalid = eqx.tree_at(lambda r: r.Ps, filtered, -jnp.ones_like(filtered.Ps))
+    smooth = jax.jit(lambda r: cx.rts(sys, r, Q=jnp.eye(1)))
+    assert smooth(filtered).successful
+    assert not smooth(invalid).successful
+    failed = eqx.tree_at(lambda r: r.solver_status, filtered, jnp.asarray(2))
+    assert smooth(failed).status == 2
+    singular = cx.types.RTSResult(xs=jnp.zeros((3, 1)), Ps=jnp.zeros((3, 1, 1)))
+    assert jax.jit(lambda r: r.successful)(singular)
+
+
 def test_uks_matches_rts_for_linear_system():
     sys = _scalar_sys()
     nonlinear = cx.nonlinear_system(

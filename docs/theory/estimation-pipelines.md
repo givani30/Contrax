@@ -197,6 +197,15 @@ $$
 P_k^s = P_k^+ + G_k \bigl(P_{k+1}^s - P_{k+1}^-\bigr) G_k^\top
 $$
 
+RTS validates the incoming filtered trajectory and propagates its failure
+status. Covariance validation first attempts a Cholesky factorization. In mixed
+trajectories, only matrices whose factorization fails use the spectral PSD
+check and its roundoff tolerance. If every factorization fails, a batched
+spectral check is used. The check does not modify covariances. The same
+validation applies when inspecting the smoothed result's status. Validation
+still costs O(T n³); fully singular trajectories also pay for the unsuccessful
+factorizations and can be slower than a spectral check alone.
+
 ### Unscented RTS-Style Smoother
 
 For `uks()`, the same backward structure is used, but the smoother gain is

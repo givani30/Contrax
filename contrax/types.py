@@ -227,7 +227,9 @@ class RTSResult(eqx.Module):
 
     @property
     def status(self) -> Array:
-        return state_status(self.xs, self.Ps, self.solver_status, trajectory=True)
+        return state_status(
+            self.xs, self.Ps, self.solver_status, trajectory=True, cholesky=True
+        )
 
     @property
     def successful(self) -> Array:

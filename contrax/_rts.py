@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 from jax import Array
 
-from contrax._filter_checks import checked, input_status
+from contrax._filter_checks import checked, input_status, state_status
 from contrax.core import DiscLTI
 from contrax.types import KalmanResult, RTSResult
 
@@ -58,7 +58,17 @@ def rts(
     Q = jnp.asarray(Q)
     if Q.shape != sys.A.shape:
         raise ValueError("Q must match the model state dimensions")
-    code = jnp.where(result.status != 0, result.status, input_status(Q))
+    # Validate the incoming trajectory once, using a PD factorization fast
+    # path with spectral fallback for singular PSD matrices.
+    forward_status = state_status(
+        result.xs, result.Ps, result.solver_status, trajectory=True, cholesky=True
+    )
+    forward_status = jnp.where(
+        forward_status != 0,
+        forward_status,
+        jnp.where(jnp.all(jnp.isfinite(result.innovations)), 0, 3),
+    )
+    code = jnp.where(forward_status != 0, forward_status, input_status(Q))
     x_hats = result.xs  # (T, n)
     Ps = result.Ps  # (T, n, n)
     if x_hats.shape[0] == 0:
