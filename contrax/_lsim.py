@@ -1,5 +1,7 @@
 """Exact sampled open-loop continuous LTI responses."""
 
+from functools import partial
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -7,6 +9,90 @@ from jax import Array
 
 from contrax.core import ContLTI, DiscLTI
 from contrax.types import SimResult
+
+
+def _hold_exponential(A, B, h, foh):
+    # Reference: Van Loan (1978), block-exponential integral identity.
+    # FOH normalizes each interval to [0,1], avoiding inverse A or division by h.
+    n, m = B.shape
+    dtype = jnp.result_type(A, B, h)
+    if foh:
+        block = jnp.block(
+            [
+                [A * h, B * h, jnp.zeros((n, m), dtype=dtype)],
+                [jnp.zeros((m, n + m), dtype=dtype), jnp.eye(m, dtype=dtype)],
+                [jnp.zeros((m, n + 2 * m), dtype=dtype)],
+            ]
+        )
+    else:
+        block = jnp.block([[A * h, B * h], [jnp.zeros((m, n + m), dtype=dtype)]])
+    return jax.scipy.linalg.expm(block)
+
+
+def _apply_hold(exponential, x, u0, u1, foh):
+    n, m = x.shape[0], u0.shape[0]
+    next_x = exponential[:n, :n] @ x + exponential[:n, n : n + m] @ u0
+    if foh:
+        next_x = next_x + exponential[:n, n + m :] @ (u1 - u0)
+    return next_x
+
+
+def _general_trajectory(A, B, intervals, us, x0, foh):
+    if A.shape[0] == 0 or intervals.shape[0] == 0:
+        return jnp.broadcast_to(x0, (us.shape[0], x0.shape[0]))
+
+    def step(x, inputs):
+        h, u0, u1 = inputs
+        exponential = _hold_exponential(A, B, h.astype(x0.dtype), foh)
+        next_x = _apply_hold(exponential, x, u0, u1, foh)
+        return next_x, next_x
+
+    _, states = jax.lax.scan(step, x0, (intervals, us[:-1], us[1:]))
+    return jnp.concatenate([x0[None], states], axis=0)
+
+
+def _uniform_intervals(intervals):
+    intervals = intervals.astype(jnp.result_type(intervals, 1.0))
+    # Differencing a floating affine time grid introduces endpoint-scale
+    # roundoff. Use the mean to preserve its full elapsed time when reusing E.
+    # Cap the budget so a long horizon cannot hide resolved grid irregularity.
+    scale = jnp.minimum(jnp.sum(jnp.abs(intervals)), 64 * jnp.max(jnp.abs(intervals)))
+    tolerance = 2 * jnp.finfo(intervals.dtype).eps * scale
+    return jnp.all(jnp.abs(intervals - jnp.mean(intervals)) <= tolerance)
+
+
+@partial(jax.custom_jvp, nondiff_argnums=(5,))
+def _lti_trajectory(A, B, intervals, us, x0, foh):
+    if A.shape[0] == 0 or intervals.shape[0] < 2:
+        return _general_trajectory(A, B, intervals, us, x0, foh)
+
+    def uniform(_):
+        exponential = _hold_exponential(A, B, jnp.mean(intervals).astype(x0.dtype), foh)
+
+        def step(x, inputs):
+            next_x = _apply_hold(exponential, x, *inputs, foh)
+            return next_x, next_x
+
+        _, states = jax.lax.scan(step, x0, (us[:-1], us[1:]))
+        return jnp.concatenate([x0[None], states], axis=0)
+
+    return jax.lax.cond(
+        _uniform_intervals(intervals),
+        uniform,
+        lambda _: _general_trajectory(A, B, intervals, us, x0, foh),
+        None,
+    )
+
+
+@_lti_trajectory.defjvp
+def _lti_trajectory_jvp(foh, primals, tangents):
+    # A cached E(mean(h)) alone collapses independent interval derivatives.
+    # Differentiate the original computation instead, including higher orders.
+    # This optimization targets primal rollouts; AD retains the general route.
+    def fn(*args):
+        return _general_trajectory(*args, foh)
+
+    return jax.jvp(fn, primals, tangents)
 
 
 def continuous_lsim(sys, us, x0, ts, interpolation, throw):
@@ -21,7 +107,7 @@ def continuous_lsim(sys, us, x0, ts, interpolation, throw):
         raise ValueError("ts and us must have shapes (N,) and (N, m)")
     dtype = jnp.result_type(sys.A, sys.B, us, x0)
     x0, us = x0.astype(dtype), us.astype(dtype)
-    n, m = sys.B.shape
+    n = sys.A.shape[0]
     if x0.shape != (n,):
         raise ValueError("x0 must have shape (n,)")
     if ts.shape[0] == 0:
@@ -32,38 +118,9 @@ def continuous_lsim(sys, us, x0, ts, interpolation, throw):
             state_times=ts,
         )
 
-    def step(x, inputs):
-        if n == 0:
-            return x, x
-        h, u0, u1 = inputs
-        h = h.astype(dtype)
-        if interpolation == "zoh":
-            block = jnp.block(
-                [[sys.A * h, sys.B * h], [jnp.zeros((m, n + m), dtype=dtype)]]
-            )
-            exponential = jax.scipy.linalg.expm(block)
-            next_x = exponential[:n, :n] @ x + exponential[:n, n:] @ u0
-        else:
-            # Reference: Van Loan (1978), block-exponential integral identity.
-            # Normalize each interval to [0,1]: u'=u1-u0, avoiding inverse A
-            # and division by h, including for marginal/singular dynamics.
-            block = jnp.block(
-                [
-                    [sys.A * h, sys.B * h, jnp.zeros((n, m), dtype=dtype)],
-                    [jnp.zeros((m, n + m), dtype=dtype), jnp.eye(m, dtype=dtype)],
-                    [jnp.zeros((m, n + 2 * m), dtype=dtype)],
-                ]
-            )
-            exponential = jax.scipy.linalg.expm(block)
-            next_x = (
-                exponential[:n, :n] @ x
-                + exponential[:n, n : n + m] @ u0
-                + exponential[:n, n + m :] @ (u1 - u0)
-            )
-        return next_x, next_x
-
-    _, states = jax.lax.scan(step, x0, (ts[1:] - ts[:-1], us[:-1], us[1:]))
-    states = jnp.concatenate([x0[None], states], axis=0)
+    states = _lti_trajectory(
+        sys.A, sys.B, ts[1:] - ts[:-1], us, x0, interpolation == "foh"
+    )
     outputs = states @ sys.C.T + us @ sys.D.T
     valid = jnp.all(jnp.isfinite(ts)) & jnp.all(ts[1:] > ts[:-1])
     result = SimResult(
@@ -96,6 +153,11 @@ def lsim(
     systems require N sample times and inputs and return N sampled states and
     outputs, with x0 at ts[0]. Exact block exponentials implement ZOH or FOH
     inputs on each interval; nonuniform grids are supported.
+
+    Uniform grids (within time-differencing roundoff) reuse one transition
+    exponential. Forward/reverse and higher derivatives use the general-grid
+    computation, retaining derivatives of every independent interval. This
+    optimization targets primal trajectories, not differentiation throughput.
 
     The input sequence has a fixed shape and each interval uses the selected
     zero-order or first-order hold convention.

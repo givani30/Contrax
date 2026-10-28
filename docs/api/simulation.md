@@ -97,6 +97,12 @@ Discrete `lsim` retains T inputs/outputs and T+1 states. It uses the model's
 sample period and accepts neither `ts=` nor continuous FOH interpolation.
 Both paths support `jit`, `vmap`, JVP and VJP for fixed sample counts.
 
+Continuous grids whose intervals agree within a small roundoff budget reuse
+one ZOH/FOH transition exponential. Other grids retain interval-by-interval
+exponentials. Forward, reverse and higher differentiation use the general-grid
+computation, preserving derivatives with respect to every independent interval.
+The optimization benefits primal rollouts; it does not promise faster gradients.
+
 Use `rollout()` when there is no system object and you simply want to scan a
 transition function over a fixed input sequence.
 It accepts state and input pytrees, including scalar state leaves, and returns

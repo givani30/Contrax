@@ -29,6 +29,19 @@ def test_marginal_integrator_nonuniform_grid_and_feedthrough(dtype, method):
     np.testing.assert_allclose(result.xs[:, 0], expected, atol=1e-6)
     np.testing.assert_allclose(result.ys[:, 0], expected + 2 * ts, atol=1e-6)
 
+    # x'=u gives an independent oracle for every interval derivative, including
+    # when the primal reuses a uniform-grid transition. Inputs stay fixed.
+    def terminal_output(intervals):
+        grid = jnp.concatenate([jnp.zeros(1, dtype=dtype), jnp.cumsum(intervals)])
+        return cx.lsim(sys, us, ts=grid, input_interpolation=method).ys[-1, 0]
+
+    intervals = jnp.full(3, 0.2, dtype=dtype)
+    direction = jnp.array([-0.7, 0.2, 0.4], dtype=dtype)
+    weights = (us[:-1, 0] + us[1:, 0]) / 2 if method == "foh" else us[:-1, 0]
+    _, tangent = jax.jvp(terminal_output, (intervals,), (direction,))
+    np.testing.assert_allclose(tangent, weights @ direction, atol=2e-6)
+    np.testing.assert_allclose(jax.grad(terminal_output)(intervals), weights, atol=2e-6)
+
 
 def test_foh_stable_scalar_analytic_response_and_derivatives():
     ts = jnp.linspace(0, 2, 9)
