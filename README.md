@@ -5,6 +5,7 @@
 [![CI](https://github.com/givani30/Contrax/actions/workflows/ci.yml/badge.svg)](https://github.com/givani30/Contrax/actions/workflows/ci.yml)
 [![Docs](https://img.shields.io/badge/docs-online-teal)](https://givani30.github.io/Contrax/)
 [![PyPI](https://img.shields.io/pypi/v/contrax)](https://pypi.org/project/contrax/)
+[![Downloads](https://api.pepy.tech/badge/contrax)](https://pepy.tech/projects/contrax)
 [![Python](https://img.shields.io/pypi/pyversions/contrax)](https://pypi.org/project/contrax/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/givani30/Contrax/blob/master/LICENSE)
 
